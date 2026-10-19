@@ -12,7 +12,15 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
-import { CATALOG_SCHEMA_VERSION } from "../src/catalog/schema.ts";
+import {
+    CATALOG_SCHEMA_VERSION,
+    isArrayOf,
+    isAxis,
+    isNumber,
+    isRecord,
+    isString,
+    isStringRecord,
+} from "../src/catalog/schema.ts";
 
 export interface AxisValue {
     id: string;
@@ -69,6 +77,22 @@ export const THUMB_QUALITY = 75;
 // sharp is libvips-backed and multi-threaded per call; a handful of concurrent
 // files keeps the CPU busy without exhausting file handles.
 const CONCURRENCY = 4;
+
+const isGeneratorEntry = (value: unknown): value is GeneratorEntry =>
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.file) &&
+    isNumber(value.widthDp) &&
+    isNumber(value.heightDp) &&
+    isStringRecord(value.values);
+
+const isGeneratorManifest = (value: unknown): value is GeneratorManifest =>
+    isRecord(value) &&
+    isNumber(value.schemaVersion) &&
+    isString(value.generatedAt) &&
+    isString(value.gitSha) &&
+    isArrayOf(value.axes, isAxis) &&
+    isArrayOf(value.entries, isGeneratorEntry);
 
 export const missingImages = (
     manifest: GeneratorManifest,
@@ -152,12 +176,20 @@ export async function importCatalog(
         );
         return "skipped";
     }
-    const manifest = JSON.parse(
-        readFileSync(manifestPath, "utf8"),
-    ) as GeneratorManifest;
-    if (manifest.schemaVersion !== CATALOG_SCHEMA_VERSION)
+    const manifest: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+    // The version is checked before the shape: a manifest from a newer
+    // generator may legitimately have a different shape, and the version is
+    // the more useful thing to report.
+    const schemaVersion = isRecord(manifest)
+        ? manifest.schemaVersion
+        : undefined;
+    if (schemaVersion !== CATALOG_SCHEMA_VERSION)
         throw new Error(
-            `import-catalog: unsupported manifest schemaVersion ${manifest.schemaVersion}`,
+            `import-catalog: unsupported manifest schemaVersion ${JSON.stringify(schemaVersion)}`,
+        );
+    if (!isGeneratorManifest(manifest))
+        throw new Error(
+            `import-catalog: ${manifestPath} does not match the generator manifest shape`,
         );
     const missing = missingImages(manifest, inputDir, existsSync);
     // The generator writes the manifest before it renders, so a partial run lists

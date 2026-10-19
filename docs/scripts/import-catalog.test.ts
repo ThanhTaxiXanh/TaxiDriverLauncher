@@ -10,7 +10,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
+import { isSiteManifest } from "../src/catalog/schema.ts";
 import {
     THUMB_WIDTH,
     importCatalog,
@@ -18,7 +19,6 @@ import {
     parseArgs,
     toSiteEntry,
     type GeneratorManifest,
-    type SiteManifest,
 } from "./import-catalog.ts";
 
 const axes = [
@@ -100,9 +100,10 @@ describe("importCatalog", () => {
         expect(
             existsSync(join(output, "thumb/floor-800x480__medium.webp")),
         ).toBe(true);
-        const site = JSON.parse(
+        const site: unknown = JSON.parse(
             readFileSync(join(output, "manifest.json"), "utf8"),
-        ) as SiteManifest;
+        );
+        assert(isSiteManifest(site), "the written manifest is a site manifest");
         expect(site.schemaVersion).toBe(1);
         expect(site.gitSha).toBe("abc1234");
         expect(site.thumbWidth).toBe(THUMB_WIDTH);
@@ -156,6 +157,16 @@ describe("importCatalog", () => {
         );
         await expect(importCatalog(input, output)).rejects.toThrow(
             /schemaVersion 2/,
+        );
+    });
+
+    it("rejects a manifest whose shape does not match", async () => {
+        writeFileSync(
+            join(input, "manifest.json"),
+            JSON.stringify({ ...manifest, entries: [{ id: "no-file" }] }),
+        );
+        await expect(importCatalog(input, output)).rejects.toThrow(
+            /does not match the generator manifest shape/,
         );
     });
 });

@@ -34,7 +34,7 @@ import {
     type Direction,
     type ViewState,
 } from "./matrix";
-import { CATALOG_SCHEMA_VERSION } from "./schema.ts";
+import { isSiteManifest } from "./schema.ts";
 
 export interface Channel {
     /** Stable identifier; also the `?channel=` URL value for a non-default channel. */
@@ -625,8 +625,9 @@ export default function CatalogViewer({ channels }: Props) {
                         kind: "error",
                         message: `HTTP ${response.status}`,
                     };
-                const manifest = (await response.json()) as SiteManifest;
-                if (manifest.schemaVersion !== CATALOG_SCHEMA_VERSION)
+                const manifest: unknown = await response.json();
+                // Rejects a version mismatch and a malformed body alike.
+                if (!isSiteManifest(manifest))
                     return {
                         kind: "error",
                         message:

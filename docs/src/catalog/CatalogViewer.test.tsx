@@ -406,6 +406,20 @@ describe("CatalogViewer", () => {
             ),
         );
     });
+
+    it("renders an error alert for a manifest whose shape does not match", async () => {
+        stubFetch({
+            ok: true,
+            status: 200,
+            body: { ...manifest, entries: [{ id: "no-urls" }] },
+        });
+        render(<CatalogViewer channels={[stableChannel]} />);
+        await waitFor(() =>
+            expect(screen.getByRole("alert").textContent).toMatch(
+                /unsupported format/i,
+            ),
+        );
+    });
 });
 
 describe("CatalogViewer build channel switch", () => {
