@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  // Prettier's width, kept from the migration: oxfmt's default of 100 would
+  // rewrap every file for no gain.
+  "printWidth": 80,
+  // oxfmt sorts package.json keys by default; Prettier never did, and the
+  // manifest's hand-kept order is not worth the churn.
+  "sortPackageJson": false,
+  "sortTailwindcss": {
+    "stylesheet": "./src/styles/global.css",
+    "functions": ["cn", "cva"]
+  },
+  // Formats .astro through the Astro Prettier plugin bundled in oxfmt, which
+  // loads the @astrojs/compiler-rs devDependency at runtime.
+  "astro": {},
+  "overrides": [
+    {
+      // AGENTS.md#code-style: prose is never hard-wrapped.
+      "files": ["*.md", "*.mdx"],
+      "options": {
+        "proseWrap": "never"
+      }
+    }
+  ],
+  // Build output, generated types and the imported screenshot catalog are not
+  // source; the lockfile is pnpm's to write.
+  "ignorePatterns": ["dist/", ".astro/", "public/catalog/", "pnpm-lock.yaml"]
+}

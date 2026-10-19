@@ -85,7 +85,8 @@ type FetchOutcome =
 // effect) to know whether to honour it or fall back to the default. The
 // default channel is never "pending" — it needs no probe.
 type Resolution =
-    { kind: "resolved"; id: string } | { kind: "pending"; requestedId: string };
+    | { kind: "resolved"; id: string }
+    | { kind: "pending"; requestedId: string };
 
 const probe = async (manifestUrl: string): Promise<boolean> => {
     try {
