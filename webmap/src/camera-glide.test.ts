@@ -172,41 +172,41 @@ describe("lerpPose", () => {
     });
 });
 
-describe("createCameraGlide", () => {
-    // A fake map, frame queue and clock: tick() advances the clock and runs
-    // every frame requested so far in one go (as a browser runs all callbacks
-    // queued for the next frame together), so each test drives the glide
-    // deterministically. The map clamps zoom at [maxZoom], as Google clamps
-    // to the map type's ceiling.
-    function harness(maxZoom = Infinity) {
-        const clock = { now: 1_000 };
-        const frames: Array<(now: number) => void> = [];
-        const applied: Array<Partial<CameraPose>> = [];
-        // What each glide handed current() as the fields it owns.
-        const owned: Array<Partial<CameraPose>> = [];
-        const camera: CameraPose = { ...REST };
-        const glide = createCameraGlide({
-            current: (fields) => {
-                owned.push({ ...fields });
-                return { ...camera };
-            },
-            apply: (pose) => {
-                applied.push(pose);
-                Object.assign(camera, pose);
-                camera.zoom = Math.min(camera.zoom, maxZoom);
-            },
-            requestFrame: (cb) => {
-                frames.push(cb);
-            },
-            now: () => clock.now,
-        });
-        const tick = (ms: number): void => {
-            clock.now += ms;
-            for (const cb of frames.splice(0)) cb(clock.now);
-        };
-        return { glide, applied, owned, frames, tick, camera };
-    }
+// A fake map, frame queue and clock: tick() advances the clock and runs
+// every frame requested so far in one go (as a browser runs all callbacks
+// queued for the next frame together), so each test drives the glide
+// deterministically. The map clamps zoom at [maxZoom], as Google clamps
+// to the map type's ceiling.
+function harness(maxZoom = Infinity) {
+    const clock = { now: 1_000 };
+    const frames: Array<(now: number) => void> = [];
+    const applied: Array<Partial<CameraPose>> = [];
+    // What each glide handed current() as the fields it owns.
+    const owned: Array<Partial<CameraPose>> = [];
+    const camera: CameraPose = { ...REST };
+    const glide = createCameraGlide({
+        current: (fields) => {
+            owned.push({ ...fields });
+            return { ...camera };
+        },
+        apply: (pose) => {
+            applied.push(pose);
+            Object.assign(camera, pose);
+            camera.zoom = Math.min(camera.zoom, maxZoom);
+        },
+        requestFrame: (cb) => {
+            frames.push(cb);
+        },
+        now: () => clock.now,
+    });
+    const tick = (ms: number): void => {
+        clock.now += ms;
+        for (const cb of frames.splice(0)) cb(clock.now);
+    };
+    return { glide, applied, owned, frames, tick, camera };
+}
 
+describe("createCameraGlide", () => {
     const TARGET: CameraPose = {
         lat: 0,
         lng: 1,

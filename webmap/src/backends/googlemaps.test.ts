@@ -413,6 +413,11 @@ function compassReports(): string[] {
     return reportedDetails("bearing");
 }
 
+// What the page told the host's diagnostics about its lens.
+function lensReports(): string[] {
+    return reportedDetails("lens");
+}
+
 // Run [frames] frames, returning how far the map heading turned on each.
 function headingSteps(page: { map: FakeMap; advance(ms: number): void }, frames: number): number[] {
     return signedHeadingSteps(page, frames).map(Math.abs);
@@ -964,11 +969,6 @@ describe("the Google Maps page", () => {
         expect(page.marker.style.left).toBe(`${(0.5 - MX) * 100}%`);
         expect(page.map.heading).toBe(90);
     });
-
-    // What the page told the host's diagnostics about its lens.
-    function lensReports(): string[] {
-        return reportedDetails("lens");
-    }
 
     it("reports the measured lens, its source and field of view, to the diagnostics once", async () => {
         fake.optics.fovyDeg = 27.3;
