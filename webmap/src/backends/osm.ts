@@ -32,25 +32,22 @@ import {
 
 setWorkerUrl(maplibreWorkerUrl);
 
-// The OSM bridge extends the base femtoBridge with the host-supplied endpoints,
-// read synchronously before the map is constructed (the same shape as the
-// Google backend's key getters). Absent outside the launcher (`vp dev`), where
-// the upstream defaults apply.
-interface OsmFemtoBridge {
-    onMapEvent(kind: string, detail: string): void;
-    // The origin that serves tiles, styles, sprites and glyphs in the upstream
-    // layout; every request under UPSTREAM_TILE_HOST is re-pointed at it.
-    tileHost(): string;
-    // The raster-DEM TileJSON injected while terrain is on.
-    terrainTileJsonUrl(): string;
-    // The style to construct the map with — the bundled base for the scheme the
-    // host will push, so a cold start fetches no hosted style it is about to
-    // replace.
-    initialStyleUrl(): string;
-}
-
-function osmBridge(): OsmFemtoBridge | undefined {
-    return window.femtoBridge as OsmFemtoBridge | undefined;
+// The OSM getters on the femtoBridge (see bridge.ts): the host-supplied
+// endpoints, read synchronously before the map is constructed (the same shape
+// as the Google backend's key getters). The bridge is absent outside the
+// launcher (`vp dev`), where the upstream defaults apply.
+declare global {
+    interface FemtoBridge {
+        // The origin that serves tiles, styles, sprites and glyphs in the upstream
+        // layout; every request under UPSTREAM_TILE_HOST is re-pointed at it.
+        tileHost(): string;
+        // The raster-DEM TileJSON injected while terrain is on.
+        terrainTileJsonUrl(): string;
+        // The style to construct the map with — the bundled base for the scheme
+        // the host will push, so a cold start fetches no hosted style it is
+        // about to replace.
+        initialStyleUrl(): string;
+    }
 }
 
 const DEFAULT_STYLE_URL = `${UPSTREAM_TILE_HOST}/styles/positron`;
@@ -82,7 +79,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
 
     // Host-supplied endpoints, read once: they are fixed for the page's life
     // (a change on the Kotlin side rebuilds the WebView).
-    const bridge = osmBridge();
+    const bridge = window.femtoBridge;
     const tileHost = bridge?.tileHost() || UPSTREAM_TILE_HOST;
     const terrainUrl = bridge?.terrainTileJsonUrl() || "";
     const initialStyleUrl = bridge?.initialStyleUrl() || DEFAULT_STYLE_URL;

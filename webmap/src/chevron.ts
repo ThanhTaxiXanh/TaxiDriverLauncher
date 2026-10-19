@@ -15,7 +15,8 @@ export interface ChevronHandles {
 export function chevronHandles(): ChevronHandles {
     // #self-marker is committed in index.html; a missing node is a build
     // error, not a runtime state.
-    const el = document.getElementById("self-marker") as HTMLElement;
+    const el = document.getElementById("self-marker");
+    if (el === null) throw new Error("#self-marker is missing from index.html");
     return { el, path: el.querySelector("path") };
 }
 
@@ -86,7 +87,10 @@ export function setChevronTransform(
 // strings. The screen-pinning rules live on the #self-marker id; the clone
 // keeps only the shared .self-marker class (placement is the map library's).
 export function geoMarkerElement(chevron: ChevronHandles): HTMLElement {
-    const el = chevron.el.cloneNode(true) as HTMLElement;
+    const el = chevron.el.cloneNode(true);
+    // cloneNode is declared to return a Node; a deep clone of an HTMLElement
+    // always is one, and the check lets the compiler see that.
+    if (!(el instanceof HTMLElement)) throw new Error("the chevron clone is not an HTMLElement");
     // Strip the id: only one #self-marker may exist in the document.
     el.removeAttribute("id");
     el.style.width = "36px";

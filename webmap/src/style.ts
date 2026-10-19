@@ -166,6 +166,11 @@ export function vectorSourceId(style: StyleSpecification): string | undefined {
     return Object.keys(sources).find((id) => sources[id].type === "vector");
 }
 
+// The vector-tile layer a style layer draws from; a background layer has none.
+function sourceLayerOf(layer: LayerSpecification): string | undefined {
+    return "source-layer" in layer ? layer["source-layer"] : undefined;
+}
+
 // Road classification by layer id, shared between the bundled light/dark styles.
 // "subtle" (the low-zoom motorway representation) classifies as minor: in the dark
 // base its colour is identical to highway_minor, and as "major" it would render a
@@ -173,7 +178,7 @@ export function vectorSourceId(style: StyleSpecification): string | undefined {
 // arrows, and aeroways fall outside the highway_/tunnel_ prefixes and keep their
 // base colours.
 export function roadClassOrNull(layer: LayerSpecification): "casing" | "minor" | "major" | null {
-    const sourceLayer = (layer as { "source-layer"?: string })["source-layer"];
+    const sourceLayer = sourceLayerOf(layer);
     if (layer.type !== "line" || sourceLayer !== "transportation") return null;
     if (!layer.id.startsWith("highway_") && !layer.id.startsWith("tunnel_")) return null;
     if (layer.id.includes("casing")) return "casing";
@@ -214,7 +219,7 @@ export function injectFeatures(
     const accent = features.accent;
     if (accent) {
         for (const l of nextStyle.layers) {
-            const sourceLayer = (l as { "source-layer"?: string })["source-layer"];
+            const sourceLayer = sourceLayerOf(l);
             const roadClass = roadClassOrNull(l);
             if (l.type === "background") setPaint(l, "background-color", accent.background);
             else if (l.type === "fill" && sourceLayer === "water")

@@ -8,6 +8,15 @@ import { createFollowEngine, type FollowCameraOpts } from "./follow-camera";
 
 const FIX = { lat: 35.681, lon: 139.767 };
 
+// The test environment has no DOM, so this class stands in for the
+// HTMLElement global: the detached-mode clone is an instance of it, which
+// passes geoMarkerElement's `instanceof HTMLElement` check, and carries the
+// members geoMarkerElement touches.
+class StubHTMLElement {
+    readonly style: Record<string, string> = {};
+    readonly removeAttribute = vi.fn();
+}
+
 function setup() {
     // The chevron's inline style, recording every property written.
     const styleWrites: string[] = [];
@@ -41,7 +50,7 @@ function setup() {
         classList: { remove: vi.fn(), toggle: vi.fn(), contains: () => false },
         querySelector: () => null,
         // The detached-mode clone (geoMarkerElement).
-        cloneNode: () => ({ removeAttribute: vi.fn(), style: {} }),
+        cloneNode: () => new StubHTMLElement(),
     };
     const listeners = new Map<string, (ev: { originalEvent?: unknown }) => void>();
     const map = {
@@ -83,10 +92,12 @@ beforeEach(() => {
         toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
     });
     vi.setSystemTime(1_000_000);
+    vi.stubGlobal("HTMLElement", StubHTMLElement);
 });
 
 afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
 });
 
 describe("the OSM follow engine", () => {

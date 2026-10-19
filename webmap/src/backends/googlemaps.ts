@@ -104,34 +104,37 @@ import { createMarkerTransition } from "../marker-motion";
 // overlay.
 import { type MarkerSpot, markerSpot } from "../style";
 
-// The Google Maps bridge extends the base femtoBridge with googleMapsApiKey()
-// and googleMapsMapId(), present only when the host has wired up the Google
-// Maps backend.
-interface GoogleMapsFemtoBridge {
-    onMapEvent(kind: string, detail: string): void;
-    // Synchronous getter injected by the host; returns the Google Maps API
-    // key. Returns an empty string when unconfigured.
-    googleMapsApiKey(): string;
-    // Synchronous getter injected by the host; returns the Cloud Map ID the
-    // user supplied, or "" when unconfigured. Independent of the rendering
-    // mode below (Maps JS 3.56.10+ renders vector without a Map ID); the Map ID
-    // still gates advanced markers and cloud styling.
-    googleMapsMapId(): string;
-    // Synchronous getter injected by the host; the user's rendering choice as
-    // the Kotlin enum name: "AUTO" | "RASTER" | "VECTOR".
-    googleMapsRendering(): string;
-    // Synchronous getter injected by the host; the map's light/dark context
-    // resolved by the host from the Map style setting and the app theme, as
-    // a google.maps.ColorScheme name: "LIGHT" | "DARK". Construction-time
-    // only, so a change rebuilds the page (see WebMapView's effectiveGoogleDark).
-    googleMapsColorScheme(): string;
+// The Google Maps getters on the femtoBridge (see bridge.ts), present only
+// when the host has wired up the Google Maps backend — hence optional, and
+// feature-detected at each read.
+declare global {
+    interface FemtoBridge {
+        // Synchronous getter injected by the host; returns the Google Maps API
+        // key. Returns an empty string when unconfigured.
+        googleMapsApiKey?(): string;
+        // Synchronous getter injected by the host; returns the Cloud Map ID the
+        // user supplied, or "" when unconfigured. Independent of the rendering
+        // mode below (Maps JS 3.56.10+ renders vector without a Map ID); the
+        // Map ID still gates advanced markers and cloud styling.
+        googleMapsMapId?(): string;
+        // Synchronous getter injected by the host; the user's rendering choice
+        // as the Kotlin enum name: "AUTO" | "RASTER" | "VECTOR".
+        googleMapsRendering?(): string;
+        // Synchronous getter injected by the host; the map's light/dark
+        // context resolved by the host from the Map style setting and the app
+        // theme, as a google.maps.ColorScheme name: "LIGHT" | "DARK".
+        // Construction-time only, so a change rebuilds the page (see
+        // WebMapView's effectiveGoogleDark).
+        googleMapsColorScheme?(): string;
+    }
 }
 
 // Minimal type stubs for the Google Maps JS API (CDN-loaded at runtime,
 // never bundled). These cover only the surface this module exercises — kept
 // narrow and local on purpose, decoupled from the full weekly-channel
-// @types/google.maps global surface the loader package pulls in; the one
-// boundary cast sits at the importLibrary call.
+// @types/google.maps global surface the loader package pulls in; the
+// importLibrary call assigns the loader's typing to them, which type-checks
+// because the real library satisfies every stub.
 interface GMLatLng {
     lat: number;
     lng: number;
@@ -201,10 +204,6 @@ interface GMMapsLibrary {
     TrafficLayer: new () => GMTrafficLayer;
 }
 
-function gmBridge(): GoogleMapsFemtoBridge | undefined {
-    return window.femtoBridge as GoogleMapsFemtoBridge | undefined;
-}
-
 // Maps the GoogleMapType enum name strings from the Android bridge to the
 // Google Maps JS API map type id strings.
 const MAP_TYPE_IDS: Record<string, string> = {
@@ -255,14 +254,14 @@ function shownValue(requested: number, shown: number, sent: number | null): numb
 export async function init(reporter: PageReporter, pending: PendingBridgeCalls): Promise<void> {
     const { log, report } = reporter;
 
-    const key = gmBridge()?.googleMapsApiKey?.() ?? "";
+    const key = window.femtoBridge?.googleMapsApiKey?.() ?? "";
     if (!key) {
         log("google-maps-no-key");
         report("fatal", "google-maps-no-key");
         return;
     }
 
-    const mapId = gmBridge()?.googleMapsMapId?.() ?? "";
+    const mapId = window.femtoBridge?.googleMapsMapId?.() ?? "";
 
     // The user's explicit choice. AUTO passes no renderingType, leaving the Map
     // ID's cloud configuration in charge (and, with no Map ID, the API's own
@@ -270,12 +269,12 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     // configuration. Vector is only ever a request: the API silently falls back
     // to raster on a device that cannot host it, which the tilesloaded handler
     // below detects. Requesting vector no longer needs a Map ID.
-    const rendering = gmBridge()?.googleMapsRendering?.() ?? "AUTO";
+    const rendering = window.femtoBridge?.googleMapsRendering?.() ?? "AUTO";
     // The OSM backend recolours its style per theme; Google's equivalent is
     // the colorScheme option, which the API only honours at construction. A
     // Map ID's cloud style takes over from it only if the user has associated
     // a dark-mode style with that Map ID in the Cloud console.
-    const colorScheme = gmBridge()?.googleMapsColorScheme?.() ?? "LIGHT";
+    const colorScheme = window.femtoBridge?.googleMapsColorScheme?.() ?? "LIGHT";
     // Only an EXPLICIT vector choice is a vector request. AUTO's outcome lives in
     // the Map ID's cloud configuration, which the page cannot read, so guessing
     // "Map ID means vector" would drive a raster-configured Map ID as vector —

@@ -11,8 +11,15 @@
 // module installs the subset it implements (the boot stubs install all of
 // them, so the host never calls into a hole).
 declare global {
+    // JS -> Android: the host's @JavascriptInterface object, named
+    // femtoBridge. The host injects one object with every method on every
+    // page; each backend module merges the getters it reads into this
+    // interface (declaration merging), next to the code that reads them.
+    interface FemtoBridge {
+        onMapEvent(kind: string, detail: string): void;
+    }
     interface Window {
-        femtoBridge?: { onMapEvent(kind: string, detail: string): void };
+        femtoBridge?: FemtoBridge;
         updateCamera: (
             lat: number,
             lon: number,

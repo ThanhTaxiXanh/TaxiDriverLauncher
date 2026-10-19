@@ -11,5 +11,9 @@ export type MapBackendName = (typeof MAP_BACKENDS)[number];
 // URL).
 export function resolveBackend(search: string): MapBackendName {
     const raw = new URLSearchParams(search).get("backend") ?? "";
-    return (MAP_BACKENDS as readonly string[]).includes(raw) ? (raw as MapBackendName) : "osm";
+    return isMapBackendName(raw) ? raw : "osm";
+}
+
+function isMapBackendName(value: string): value is MapBackendName {
+    return MAP_BACKENDS.some((name) => name === value);
 }
