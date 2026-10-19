@@ -32,6 +32,10 @@
   minimumReleaseAge: "3 days",
   // Auto-merge the weekly webmap pnpm-lock.yaml refresh together with regular updates.
   lockFileMaintenance: { automerge: true },
+  // The weekly window allows only a few Renovate runs, and the default limit of
+  // two new PRs per hour left the pnpm group and lock file maintenance
+  // rate-limited week after week.
+  prHourlyLimit: 0,
   packageRules: [
     {
       description: "Auto-merge non-major updates once CI passes",
@@ -60,6 +64,22 @@
       description: "Group the pnpm projects (webmap, docs)",
       matchManagers: ["npm"],
       groupName: "pnpm",
+    },
+    {
+      // The java-version datasource publishes no release timestamps, so with the
+      // default minimumReleaseAgeBehaviour (timestamp-required) a JDK update
+      // stays in "Pending Status Checks" forever. Majors still need dashboard approval.
+      description: "Skip the release-age hold for JDK versions, which carry no timestamps",
+      matchDatasources: ["java-version"],
+      minimumReleaseAge: null,
+    },
+    {
+      // @astrojs/check, which runs `astro check`, supports TypeScript ^5 || ^6
+      // only. webmap is not affected and stays on TypeScript 7.
+      description: "Keep the docs site below TypeScript 7 until Astro supports it",
+      matchFileNames: ["docs/package.json"],
+      matchPackageNames: ["typescript"],
+      allowedVersions: "<7",
     },
   ],
   customManagers: [
