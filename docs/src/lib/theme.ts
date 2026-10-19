@@ -61,6 +61,15 @@ export function applyTheme(mode: ThemeMode, doc: Document = document): void {
     }
 }
 
+const onBeforeSwap = (event: Event): void => {
+    const incoming = (event as Event & { newDocument?: Document }).newDocument;
+    if (incoming) applyTheme(readThemeMode(), incoming);
+};
+
+const onMediaChange = (): void => {
+    if (readThemeMode() === "system") applyTheme("system");
+};
+
 /**
  * Keep the theme alive across client-side navigations and OS changes.
  * `astro:before-swap` hands over the incoming document before it replaces the
@@ -68,17 +77,9 @@ export function applyTheme(mode: ThemeMode, doc: Document = document): void {
  * copies only the server-rendered <html> attributes (which carry no theme).
  */
 export function installThemeSync(): () => void {
-    const onBeforeSwap = (event: Event) => {
-        const incoming = (event as Event & { newDocument?: Document })
-            .newDocument;
-        if (incoming) applyTheme(readThemeMode(), incoming);
-    };
     document.addEventListener("astro:before-swap", onBeforeSwap);
 
     let media: MediaQueryList | null = null;
-    const onMediaChange = () => {
-        if (readThemeMode() === "system") applyTheme("system");
-    };
     try {
         media = window.matchMedia("(prefers-color-scheme: dark)");
         media.addEventListener("change", onMediaChange);
