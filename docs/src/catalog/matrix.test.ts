@@ -281,7 +281,7 @@ describe("buildMatrix", () => {
             "head-unit",
         ]);
         expect(
-            matrix.rows[1]!.cells.map((cell) => cell.entry?.id ?? null),
+            matrix.rows[1].cells.map((cell) => cell.entry?.id ?? null),
         ).toEqual([
             "head-unit__small__light",
             "head-unit__medium__light",
@@ -295,7 +295,7 @@ describe("buildMatrix", () => {
             fixed: { theme: "dark" },
         });
         expect(
-            matrix.rows[0]!.cells.map((cell) => cell.entry?.id ?? null),
+            matrix.rows[0].cells.map((cell) => cell.entry?.id ?? null),
         ).toEqual(["floor__small__dark", null, null]);
     });
 });

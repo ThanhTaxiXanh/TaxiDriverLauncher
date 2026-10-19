@@ -109,7 +109,7 @@ const mapWithConcurrency = async <T, R>(
             index !== undefined;
             index = queue.shift()
         ) {
-            results.push([index, await fn(items[index] as T)]);
+            results.push([index, await fn(items[index])]);
         }
     };
     const workerCount = Math.min(limit, items.length);

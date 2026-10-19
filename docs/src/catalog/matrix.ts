@@ -169,7 +169,7 @@ export const neighbourId = (
         row.cells.some((cell) => cell.entry?.id === state.open),
     );
     if (rowIndex === -1) return null;
-    const colIndex = matrix.rows[rowIndex]!.cells.findIndex(
+    const colIndex = matrix.rows[rowIndex].cells.findIndex(
         (cell) => cell.entry?.id === state.open,
     );
     const step = direction === "left" || direction === "up" ? -1 : 1;
@@ -180,10 +180,10 @@ export const neighbourId = (
         r >= 0 &&
         r < matrix.rows.length &&
         c >= 0 &&
-        c < matrix.rows[0]!.cells.length;
+        c < matrix.rows[0].cells.length;
         r += horizontal ? 0 : step, c += horizontal ? step : 0
     ) {
-        const candidate = matrix.rows[r]!.cells[c]!.entry;
+        const candidate = matrix.rows[r].cells[c].entry;
         if (candidate !== null) return candidate.id;
     }
     return null;

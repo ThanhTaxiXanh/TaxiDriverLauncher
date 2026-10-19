@@ -192,7 +192,7 @@ describe("pure helpers", () => {
 
     it("toSiteEntry swaps the PNG path for the WebP pair and records pixel size", () => {
         expect(
-            toSiteEntry(manifest.entries[1]!, { width: 800, height: 480 }),
+            toSiteEntry(manifest.entries[1], { width: 800, height: 480 }),
         ).toEqual({
             id: "floor-800x480__medium",
             widthDp: 800,
