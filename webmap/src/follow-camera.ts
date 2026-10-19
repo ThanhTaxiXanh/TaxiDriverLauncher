@@ -394,10 +394,10 @@ export function createFollowEngine(deps: FollowEngineDeps): FollowEngine {
             }
         },
         setFollow(follow): void {
-            setFollowing(!!follow);
+            setFollowing(follow);
         },
         setNorthUp(enabled): void {
-            state.northUp = !!enabled;
+            state.northUp = enabled;
             // Re-orient immediately while following; a detached camera keeps
             // the user's rotation until re-attach. The chevron flips with the
             // camera — waiting for the next fix would leave it pointing wrong

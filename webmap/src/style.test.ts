@@ -31,7 +31,7 @@ function roadLine(id: string): LayerSpecification {
         type: "line",
         source: "openmaptiles",
         "source-layer": "transportation",
-    } as LayerSpecification;
+    };
 }
 
 function baseStyle(): StyleSpecification {
@@ -89,7 +89,7 @@ function baseStyle(): StyleSpecification {
                 paint: { "text-halo-width": 1.4 },
             },
         ],
-    } as StyleSpecification;
+    };
 }
 
 // Paint map of one layer by id; module-scoped so it is not re-created per

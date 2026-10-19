@@ -362,7 +362,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
         // hidden then, and a layout or tilt change moves its spot with no
         // camera move, so the re-follow's placement sets the new spot before
         // its glide reads the map back. Centred until the first placement.
-        spot: { x: 0, y: 0 } as MarkerSpot,
+        spot: { x: 0, y: 0 },
         // Whether the chevron is on screen at [spot]: false while it is
         // hidden (detached) or not yet placed, when a new spot takes no glide
         // of its own (see spotMotion).
@@ -399,7 +399,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
         lensGen: 0,
         // The lens correction moveCam last sent: what lensFrom freezes when a
         // measurement arrives in the middle of a blend.
-        lensSent: { yawDeg: 0, x: 0, y: 0 } as LensEffect,
+        lensSent: { yawDeg: 0, x: 0, y: 0 },
         // The camera the lens was last measured at: the perspective only
         // changes with these, so a probe re-measures only when one moved.
         lensAt: { tilt: Number.NaN, zoom: Number.NaN, width: 0, height: 0 },
@@ -475,12 +475,13 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     // as long as it lasts. Anything thrown after this point happens with the
     // script loaded and reaches the host as map-init-exception, which it
     // retries only within its budget: from `new mapsLib.Map` on, every reload
-    // is a billed map load. The cast narrows the loader's full google.maps
-    // typing to the local stubs above.
+    // is a billed map load. The annotation widens the loader's full
+    // google.maps typing to the local stubs above (a checked assignment, not
+    // a cast: the real library satisfies them).
     setOptions({ key, v: "weekly" });
-    const mapsLib = (await importLibrary("maps").catch((e: unknown) => {
+    const mapsLib: GMMapsLibrary = await importLibrary("maps").catch((e: unknown) => {
         throw new ScriptLoadError(e instanceof Error ? e.message : String(e));
-    })) as unknown as GMMapsLibrary;
+    });
 
     const mapEl = document.getElementById("map");
     if (!mapEl) {
@@ -549,7 +550,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     // north-up surface the chevron placement and the centre math assume, and
     // keeps tilt_changed from ever firing there (the gesture detacher below
     // would read a flip as a user gesture).
-    const liveMap = new mapsLib.Map(mapEl as HTMLElement, {
+    const liveMap = new mapsLib.Map(mapEl, {
         center: { lat: 0, lng: 0 },
         zoom: 1,
         mapTypeId: "roadmap",
@@ -1320,7 +1321,7 @@ export async function init(reporter: PageReporter, pending: PendingBridgeCalls):
     window.setFollow = (follow) => (follow ? setFollowing(true) : userTookCamera());
 
     window.setNorthUp = (enabled) => {
-        state.northUp = !!enabled;
+        state.northUp = enabled;
         // Raster maps are north-up only and cannot rotate, so this is a no-op
         // for the map there; the chevron always shows the bearing regardless.
         if (!state.isVector) return;

@@ -172,7 +172,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         // them (transient by definition — never UI, never a backend switch)
         // unless one of the two outcome-gated fatals above concludes otherwise.
         liveMap.on("error", (e) => {
-            const detail = String(e?.error?.message || "unknown map error");
+            const detail = e?.error?.message || "unknown map error";
             const status = requestStatusOf(e?.error);
             log(`error: ${detail}`);
             reportErrorThrottled(detail);
@@ -337,7 +337,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
                 noTileWatchdog.onStyleSwap();
             }
             state.currentStyleUrl = url;
-            setPageAttribution(!!pageAttribution);
+            setPageAttribution(pageAttribution);
             state.accentColors = bg
                 ? {
                       background: bg,
@@ -356,8 +356,8 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         // theme-tracked extrusion colour), then re-apply the style so
         // transformStyle injects (or omits) the matching layers/sources.
         window.setFeatures = (buildings, terrain, buildingColor) => {
-            state.buildings = !!buildings;
-            state.terrain = !!terrain;
+            state.buildings = buildings;
+            state.terrain = terrain;
             state.buildingColor = buildingColor || "";
             applyStyleWithFade();
         };
