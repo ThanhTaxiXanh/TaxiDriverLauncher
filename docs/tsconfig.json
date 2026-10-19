@@ -20,9 +20,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "types": ["astro/client", "node"],
-    "baseUrl": ".",
+    // No `baseUrl`: TypeScript 7 removed it, and `oxlint --type-aware` runs
+    // on tsgolint (typescript-go), which rejects it. Without `baseUrl`,
+    // `paths` resolve relative to this file, so the targets start with `./`.
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [
