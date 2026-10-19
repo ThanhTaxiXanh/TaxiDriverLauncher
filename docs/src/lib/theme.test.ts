@@ -57,15 +57,16 @@ describe("applyTheme", () => {
         expect(localStorage.getItem(STORAGE_KEY)).toBe("dark");
     });
     it("persists system verbatim and resolves it", () => {
-        vi.spyOn(window, "matchMedia").mockImplementation(
-            (q) =>
-                ({
-                    matches: false,
-                    media: q,
-                    addEventListener() {},
-                    removeEventListener() {},
-                }) as unknown as MediaQueryList,
-        );
+        vi.spyOn(window, "matchMedia").mockImplementation((q) => ({
+            matches: false,
+            media: q,
+            onchange: null,
+            addListener() {},
+            removeListener() {},
+            addEventListener() {},
+            removeEventListener() {},
+            dispatchEvent: () => false,
+        }));
         applyTheme("system");
         expect(document.documentElement.dataset.theme).toBe("light");
         expect(document.documentElement.dataset.themeMode).toBe("system");
@@ -92,19 +93,19 @@ describe("installThemeSync", () => {
         localStorage.setItem(STORAGE_KEY, "dark");
         const dispose = installThemeSync();
         const incoming = document.implementation.createHTMLDocument("next");
-        const event = new Event("astro:before-swap") as Event & {
-            newDocument: Document;
-        };
-        event.newDocument = incoming;
-        document.dispatchEvent(event);
+        document.dispatchEvent(
+            Object.assign(new Event("astro:before-swap"), {
+                newDocument: incoming,
+            }),
+        );
         expect(incoming.documentElement.dataset.theme).toBe("dark");
         dispose();
         const later = document.implementation.createHTMLDocument("later");
-        const again = new Event("astro:before-swap") as Event & {
-            newDocument: Document;
-        };
-        again.newDocument = later;
-        document.dispatchEvent(again);
+        document.dispatchEvent(
+            Object.assign(new Event("astro:before-swap"), {
+                newDocument: later,
+            }),
+        );
         expect(later.documentElement.dataset.theme).toBeUndefined();
     });
 });

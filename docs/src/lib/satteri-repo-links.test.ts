@@ -1,4 +1,4 @@
-import type { Element } from "hast";
+import { markdownToHtml } from "satteri";
 import { describe, expect, it } from "vitest";
 import satteriRepoLinks, {
     rewriteRepoHref,
@@ -13,12 +13,6 @@ const options: RepoLinksOptions = {
         "PRIVACY.md": "/privacy/",
         "TERMS.md": "/terms/",
     },
-};
-
-// A minimal stand-in for HastVisitorContext: the plugin under test only calls
-// `setProperty`, so that is all the fake context needs to implement.
-const setProperty = (target: Element, name: string, value: string) => {
-    target.properties[name] = value;
 };
 
 describe("rewriteRepoHref", () => {
@@ -55,18 +49,13 @@ describe("rewriteRepoHref", () => {
 });
 
 describe("satteriRepoLinks", () => {
-    it("rewrites the href of an anchor element through the plugin context", () => {
-        const node: Element = {
-            type: "element",
-            tagName: "a",
-            properties: { href: "PRIVACY.md" },
-            children: [{ type: "text", value: "Privacy Policy" }],
-        };
-        const plugin = satteriRepoLinks(options);
-        const element = plugin.element;
-        if (!element || Array.isArray(element))
-            throw new Error("the plugin must define a single element pass");
-        element.visit(node, { setProperty } as never);
-        expect(node.properties.href).toBe("/privacy/");
+    // Runs the real satteri pipeline rather than calling `visit` with a fake
+    // HastVisitorContext: the plugin is then exercised through the same
+    // context Astro gives it, with no partial stand-in to keep in sync.
+    it("rewrites the href of an anchor element through the plugin context", async () => {
+        const { html } = await markdownToHtml("[Privacy Policy](PRIVACY.md)", {
+            hastPlugins: [satteriRepoLinks(options)],
+        });
+        expect(html).toContain('<a href="/privacy/">Privacy Policy</a>');
     });
 });

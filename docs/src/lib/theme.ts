@@ -15,7 +15,7 @@ const THEME_COLOR: Record<Appearance, string> = {
     light: "#ffffff",
 };
 
-const isMode = (value: string | null): value is ThemeMode =>
+export const isThemeMode = (value: string | null): value is ThemeMode =>
     value !== null && (THEME_MODES as readonly string[]).includes(value);
 
 // localStorage can throw (Safari "block all cookies", private mode, sandboxed
@@ -23,7 +23,7 @@ const isMode = (value: string | null): value is ThemeMode =>
 export function readThemeMode(): ThemeMode {
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        return isMode(stored) ? stored : "system";
+        return isThemeMode(stored) ? stored : "system";
     } catch {
         return "system";
     }

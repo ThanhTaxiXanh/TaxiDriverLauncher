@@ -31,6 +31,12 @@ function ToggleGroup({
         spacing?: number;
         orientation?: "horizontal" | "vertical";
     }) {
+    // Typed rather than asserted: React.CSSProperties declares no custom
+    // properties, and the intersection admits `--gap` while still checking
+    // the object against CSSProperties.
+    const style: React.CSSProperties & { "--gap": number } = {
+        "--gap": spacing,
+    };
     return (
         <ToggleGroupPrimitive
             data-slot="toggle-group"
@@ -38,7 +44,7 @@ function ToggleGroup({
             data-size={size}
             data-spacing={spacing}
             data-orientation={orientation}
-            style={{ "--gap": spacing } as React.CSSProperties}
+            style={style}
             className={cn(
                 "group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] rounded-lg data-[size=sm]:rounded-[min(var(--radius-md),10px)] data-vertical:flex-col data-vertical:items-stretch",
                 className,

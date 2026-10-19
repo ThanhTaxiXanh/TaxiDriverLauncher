@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/sheet";
 import {
     applyTheme,
+    isThemeMode,
     readThemeMode,
     THEME_MODES,
     type ThemeMode,
@@ -77,8 +78,8 @@ function getServerThemeMode(): ThemeMode {
     return "system";
 }
 function chooseThemeMode(next: string): void {
-    if (!(THEME_MODES as readonly string[]).includes(next)) return;
-    applyTheme(next as ThemeMode);
+    if (!isThemeMode(next)) return;
+    applyTheme(next);
     notifyThemeChange();
 }
 

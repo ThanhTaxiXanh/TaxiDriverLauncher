@@ -7,7 +7,7 @@ import {
     waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import CatalogViewer, { type Channel } from "./CatalogViewer";
 import type { SiteManifest } from "./manifest";
 
@@ -372,8 +372,8 @@ describe("CatalogViewer", () => {
         fireEvent.click(screen.getByRole("button", { name: /Floor · Small/ }));
         await screen.findByRole("dialog");
         const overlay = document.querySelector('[data-slot="dialog-overlay"]');
-        expect(overlay).not.toBeNull();
-        await user.click(overlay as HTMLElement);
+        assert.isNotNull(overlay);
+        await user.click(overlay);
         await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
         expect(window.location.search).not.toContain("open=");
     });
