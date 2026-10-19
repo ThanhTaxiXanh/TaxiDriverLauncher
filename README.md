@@ -98,7 +98,7 @@ To enable the optional paid Google Maps provider, enter a personal Google Maps P
 
 ## Building from source
 
-The build needs a Java Development Kit (JDK) 21, the Android software development kit (SDK), and an Android 13+ device or emulator. The Gradle build provisions Node.js and pnpm on demand for the bundled map page.
+The build needs a Java Development Kit (JDK) 25, the Android software development kit (SDK), and an Android 13+ device or emulator. The Gradle build provisions Node.js and pnpm on demand for the bundled map page.
 
 ```bash
 ./gradlew assembleStableDebug   # debug APK at app/build/outputs/apk/stable/debug/
