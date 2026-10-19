@@ -236,7 +236,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
                     el.style.opacity = "1";
                     el.style.display = "block";
                 } catch (e) {
-                    log(`style-fade capture failed: ${e instanceof Error ? e.message : e}`);
+                    log(`style-fade capture failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
                 setTimeout(() => {
                     if (gen !== state.styleFadeGen) return;
@@ -371,8 +371,11 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         if (pending.updateCamera) window.updateCamera(...pending.updateCamera);
         if (pending.onHostResume) window.onHostResume();
     } catch (e) {
-        log(`exception:${e instanceof Error ? e.message : e}`);
+        log(`exception:${e instanceof Error ? e.message : String(e)}`);
         // The map object never came up; this page will stay blank forever.
-        report("fatal", `map-init-exception: ${e instanceof Error ? e.message : e}`.slice(0, 200));
+        report(
+            "fatal",
+            `map-init-exception: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200),
+        );
     }
 }

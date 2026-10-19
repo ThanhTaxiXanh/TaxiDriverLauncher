@@ -83,14 +83,19 @@ export type MapEventKind =
     | "tile"
     | "lens";
 
+// Function-typed properties rather than methods: the backends destructure
+// the reporter and hand its functions around (`const { log, report } =
+// reporter`), which is safe because no implementation reads `this`.
 export interface PageReporter {
     // Diagnostic logging only (visible via chrome://inspect or the debug
     // build's WebChromeClient); prefixed per backend for logcat greppability.
-    log(msg: string): void;
-    report(kind: MapEventKind, detail: unknown): void;
+    log: (msg: string) => void;
+    // The detail is a string, or the follow state as a boolean; the host
+    // receives it stringified either way.
+    report: (kind: MapEventKind, detail: string | boolean) => void;
     // Tile / style fetch failures (and uncaught page errors) can fire per
     // frame on a flaky link, so reports to the host are throttled.
-    reportErrorThrottled(detail: string): void;
+    reportErrorThrottled: (detail: string) => void;
 }
 
 const ERROR_REPORT_INTERVAL_MS = 10_000;
@@ -111,9 +116,9 @@ export function redactSecrets(detail: string): string {
 
 // Module-scoped (it captures nothing per reporter): the one funnel for every
 // JS -> Android event.
-function reportToHost(kind: MapEventKind, detail: unknown): void {
+function reportToHost(kind: MapEventKind, detail: string | boolean): void {
     try {
-        window.femtoBridge?.onMapEvent(kind, redactSecrets(String(detail ?? "")));
+        window.femtoBridge?.onMapEvent(kind, redactSecrets(String(detail)));
     } catch {
         // The bridge may be absent outside the launcher (e.g. vp dev).
     }
@@ -161,7 +166,7 @@ export function createReporter(prefix: string): PageReporter {
 export const BEARING_REPORT_INTERVAL_MS = 150;
 
 export function createBearingReporter(
-    report: (kind: MapEventKind, detail: unknown) => void,
+    report: (kind: MapEventKind, detail: string) => void,
     deps: {
         now?: () => number;
         schedule?: (callback: () => void, delayMs: number) => void;

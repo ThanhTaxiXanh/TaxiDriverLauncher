@@ -162,7 +162,9 @@ export interface StyleLoadWatchdog {
     // setStyleUrl switched to another style: a fresh load, judged like a cold
     // start. A timer armed for the replaced style has nothing left to judge.
     onStyleSwap(): void;
-    styleLoaded(): boolean;
+    // A function-typed property, not a method: the OSM backend hands it to
+    // the no-tile watchdog unbound, which is safe because it reads no `this`.
+    styleLoaded: () => boolean;
 }
 
 // An error before the style has loaded CAN mean the style fetch itself failed,

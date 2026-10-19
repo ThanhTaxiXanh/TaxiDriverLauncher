@@ -87,8 +87,10 @@ export interface FollowEngine {
     setFollow: Window["setFollow"];
     setNorthUp: Window["setNorthUp"];
     // Host lifecycle resume: re-measure and repaint so the map recovers after
-    // a pause/resume cycle (guards a stale GL surface on Android).
-    onHostResume(): void;
+    // a pause/resume cycle (guards a stale GL surface on Android). A
+    // function-typed property like the bridge functions above: the backend
+    // installs it on window unbound, so it must not read `this`.
+    onHostResume: () => void;
 }
 
 export function createFollowEngine(deps: FollowEngineDeps): FollowEngine {
