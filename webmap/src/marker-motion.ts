@@ -13,7 +13,7 @@
 // camera land together; the fix writes the same left/top for an unchanged
 // layout, which does not restart the running transition.
 import type { MarkerTransitionStep } from "./camera";
-import { setChevronStyle } from "./chevron";
+import { type ChevronStyleTarget, setChevronStyle } from "./chevron";
 
 export interface MarkerTransition {
     // Arms (or clears) the CSS transition; call before writing the new
@@ -26,7 +26,10 @@ export interface MarkerTransition {
     remainingMs(): number;
 }
 
-export function createMarkerTransition(el: HTMLElement, durationMs: number): MarkerTransition {
+export function createMarkerTransition(
+    el: ChevronStyleTarget,
+    durationMs: number,
+): MarkerTransition {
     // Mutable state in one const holder (let/var are banned — see the
     // vite.config.ts lint block and no-let.js). The generation guards the
     // self-clearing timeout below against a stale clear: two reflows in quick

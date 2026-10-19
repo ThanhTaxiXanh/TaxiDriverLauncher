@@ -5,7 +5,7 @@
 // pivot, and the gesture options. The test environment has no DOM, so the
 // page's few element and window accesses are stubbed here.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import type { PendingBridgeCalls } from "../bridge";
+import type { MapEventKind, PageReporter, PendingBridgeCalls } from "../bridge";
 import { LAYOUT_REFLOW_MS, shortestBearingDelta, smoothedBearing } from "../camera";
 import { markerDrop, markerXFraction } from "../style";
 import { init } from "./googlemaps";
@@ -50,7 +50,8 @@ const fake = vi.hoisted(() => {
             this.onAdd();
         }
         getProjection(): { fromLatLngToContainerPixel(latLng: LatLng): { x: number; y: number } } {
-            const host = this.host as FakeMap;
+            const host = this.host;
+            if (host === null) throw new Error("getProjection() before setMap()");
             return {
                 fromLatLngToContainerPixel: (latLng) => host.project(latLng, !optics.flatCanvas),
             };
@@ -98,10 +99,7 @@ const fake = vi.hoisted(() => {
             return Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / (2 * Math.PI);
         }
         static viewport(): { width: number; height: number } {
-            const win = (
-                globalThis as unknown as { window: { innerWidth: number; innerHeight: number } }
-            ).window;
-            return { width: win.innerWidth, height: win.innerHeight };
+            return { width: window.innerWidth, height: window.innerHeight };
         }
         center = { lat: 0, lng: 0 };
         zoom = 1;
@@ -329,7 +327,11 @@ const DROP = markerDrop(70, 0.1);
 const MX = markerXFraction(0.428);
 const FIX = { lat: 35.681, lng: 139.767 };
 
-const reporter = { log: vi.fn(), report: vi.fn(), reportErrorThrottled: vi.fn() };
+const reporter = {
+    log: vi.fn<PageReporter["log"]>(),
+    report: vi.fn<PageReporter["report"]>(),
+    reportErrorThrottled: vi.fn<PageReporter["reportErrorThrottled"]>(),
+};
 
 function noPendingCalls(): PendingBridgeCalls {
     return {
@@ -347,8 +349,7 @@ function noPendingCalls(): PendingBridgeCalls {
 // down), through the fake map's perspective camera.
 function screenOf(map: FakeMap, loc: { lat: number; lng: number }): { x: number; y: number } {
     const at = map.project(loc);
-    const win = window as unknown as { innerWidth: number; innerHeight: number };
-    return { x: at.x - win.innerWidth / 2, y: at.y - win.innerHeight / 2 };
+    return { x: at.x - window.innerWidth / 2, y: at.y - window.innerHeight / 2 };
 }
 
 // The location [eastPx] / [northPx] flat px from [loc] at [zoom].
@@ -399,11 +400,17 @@ function leanPx(map: FakeMap, fix: { lat: number; lng: number }, bearing: number
     return Math.abs(screenOf(map, aheadOf(fix, bearing, 120)).x - screenOf(map, fix).x);
 }
 
+// Every detail the page reported to the host under [kind], as the host
+// receives it (stringified).
+function reportedDetails(kind: MapEventKind): string[] {
+    return reporter.report.mock.calls
+        .filter(([reported]) => reported === kind)
+        .map(([, detail]) => String(detail));
+}
+
 // Every bearing the page reported to the host's compass.
 function compassReports(): string[] {
-    return reporter.report.mock.calls
-        .filter(([kind]) => kind === "bearing")
-        .map(([, detail]) => detail as string);
+    return reportedDetails("bearing");
 }
 
 // Run [frames] frames, returning how far the map heading turned on each.
@@ -425,8 +432,7 @@ function signedHeadingSteps(
 
 // The bearing the page last reported to the host's compass.
 function lastCompass(): string | undefined {
-    const calls = reporter.report.mock.calls.filter(([kind]) => kind === "bearing");
-    return calls.at(-1)?.[1] as string | undefined;
+    return compassReports().at(-1);
 }
 
 interface PushOptions {
@@ -475,35 +481,27 @@ async function boot(
     const path = { setAttribute: vi.fn(), getAttribute: () => null };
     // The chevron's inline style, recording every property written.
     const styleWrites: string[] = [];
+    const style = {
+        left: "50%",
+        top: "50%",
+        transform: "",
+        transition: "",
+        display: "none",
+        setProperty: vi.fn<(name: string, value: string) => void>(),
+    };
     const marker = {
-        style: new Proxy(
-            {
-                left: "50%",
-                top: "50%",
-                transform: "",
-                transition: "",
-                display: "none",
-                setProperty: vi.fn(),
-            } as Record<string, unknown>,
-            {
-                set(target, property, value) {
-                    styleWrites.push(String(property));
-                    target[String(property)] = value;
-                    return true;
-                },
+        style: new Proxy(style, {
+            set(target, property, value) {
+                styleWrites.push(String(property));
+                return Reflect.set(target, property, value);
             },
-        ) as unknown as {
-            left: string;
-            top: string;
-            transform: string;
-            transition: string;
-            display: string;
-            setProperty: (name: string, value: string) => void;
-        },
+        }),
         classList: { remove: vi.fn(), toggle: vi.fn(), contains: () => false },
         querySelector: (selector: string) => (selector === "path" ? path : null),
     };
-    const win = {
+    // The window the page sees, as a plain object (no DOM here). A test
+    // resizes the viewport by writing innerWidth / innerHeight on it.
+    const stubWindow = {
         innerWidth: width,
         innerHeight: height,
         femtoBridge: {
@@ -515,9 +513,9 @@ async function boot(
         },
         addEventListener: vi.fn(),
         dispatchEvent: vi.fn(),
-    } as unknown as Window;
+    };
     const frames: Array<(now: number) => void> = [];
-    vi.stubGlobal("window", win);
+    vi.stubGlobal("window", stubWindow);
     vi.stubGlobal("document", {
         getElementById: (id: string) => ({ map: { style: {} }, "self-marker": marker })[id] ?? null,
         createElement: () => ({
@@ -542,7 +540,10 @@ async function boot(
     const run = (count: number): void => {
         Array.from({ length: count }).forEach(() => advance(16));
     };
-    return { win, map, marker, styleWrites, advance, run };
+    // The global `window` is the stub from here on: reading it through the
+    // global keeps its declared Window type, which carries the bridge
+    // functions init installed on it.
+    return { win: window, stubWindow, map, marker, path, styleWrites, advance, run };
 }
 
 // Make Date.now advance by 1 ms on every call, as a real clock can between
@@ -740,9 +741,8 @@ describe("the Google Maps page", () => {
         // new size, the lens is re-measured, and the parked car sends no fix.
         // The yaw blends to the new lens over the reflow motion; the chevron
         // keeps its spot.
-        const win = page.win as unknown as { innerWidth: number; innerHeight: number };
-        win.innerWidth = 1400;
-        win.innerHeight = 360;
+        page.stubWindow.innerWidth = 1400;
+        page.stubWindow.innerHeight = 360;
         const steps = headingSteps(page, 30);
         expect(Math.max(...steps)).toBeLessThan(1);
         expect(Math.abs(shortestBearingDelta(before, page.map.heading))).toBeGreaterThan(5);
@@ -797,9 +797,8 @@ describe("the Google Maps page", () => {
             const page = await boot("VECTOR", "VECTOR");
             push(page.win, FIX, 90);
             page.run(50);
-            const win = page.win as unknown as { innerWidth: number; innerHeight: number };
-            win.innerWidth = width;
-            win.innerHeight = height;
+            page.stubWindow.innerWidth = width;
+            page.stubWindow.innerHeight = height;
             // The map draws its first frame at the new size before the page
             // can react (the browser resizes, then renders); the page measures
             // the new lens in that frame and re-places the camera from the
@@ -833,14 +832,13 @@ describe("the Google Maps page", () => {
         push(page.win, FIX, 90);
         page.run(50);
         page.map.fire("dragstart");
-        const win = page.win as unknown as { innerWidth: number; innerHeight: number };
         for (const [width, height] of [
             [1400, 360],
             [700, 600],
             [1100, 420],
         ]) {
-            win.innerWidth = width;
-            win.innerHeight = height;
+            page.stubWindow.innerWidth = width;
+            page.stubWindow.innerHeight = height;
             page.run(3);
         }
         page.win.setFollow(true);
@@ -969,9 +967,7 @@ describe("the Google Maps page", () => {
 
     // What the page told the host's diagnostics about its lens.
     function lensReports(): string[] {
-        return reporter.report.mock.calls
-            .filter(([kind]) => kind === "lens")
-            .map(([, detail]) => detail as string);
+        return reportedDetails("lens");
     }
 
     it("reports the measured lens, its source and field of view, to the diagnostics once", async () => {
@@ -1215,15 +1211,12 @@ describe("the Google Maps page", () => {
         page.run(50);
         page.styleWrites.length = 0;
         // Nor its colour: the host sends the same one with every fix.
-        const path = page.marker.querySelector("path") as {
-            setAttribute: ReturnType<typeof vi.fn>;
-        };
-        path.setAttribute.mockClear();
+        page.path.setAttribute.mockClear();
         vi.mocked(page.marker.style.setProperty).mockClear();
         push(page.win, aheadOf(FIX, 90, 20), 90);
         page.run(10);
         expect(page.styleWrites).toEqual([]);
-        expect(path.setAttribute).not.toHaveBeenCalled();
+        expect(page.path.setAttribute).not.toHaveBeenCalled();
         expect(page.marker.style.setProperty).not.toHaveBeenCalled();
     });
 

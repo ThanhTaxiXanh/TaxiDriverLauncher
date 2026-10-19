@@ -1,7 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import {
     calibrateLens,
-    type LensCalibration,
     lensGroundOffset,
     lensMoved,
     lensProbeDistancePx,
@@ -84,9 +83,9 @@ describe("calibrateLens", () => {
     it("recovers the focal length and the camera distance from two probes", () => {
         for (const { cam, heightPx } of randomCameras(200)) {
             const lens = calibrateLens(probe(cam, heightPx));
-            expect(lens).not.toBeNull();
-            expect((lens as LensCalibration).focalPx / cam.focalPx).toBeCloseTo(1, 9);
-            expect((lens as LensCalibration).distancePx / cam.distancePx).toBeCloseTo(1, 9);
+            assert.isNotNull(lens);
+            expect(lens.focalPx / cam.focalPx).toBeCloseTo(1, 9);
+            expect(lens.distancePx / cam.distancePx).toBeCloseTo(1, 9);
         }
     });
 

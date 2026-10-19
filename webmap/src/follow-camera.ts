@@ -57,7 +57,8 @@ export interface GlFollowMap {
     jumpTo(opts: FollowCameraOpts): unknown;
     on(type: string, listener: (ev: { originalEvent?: unknown }) => void): unknown;
     getBearing(): number;
-    getContainer(): HTMLElement;
+    // Only the container's size is read (for the camera padding).
+    getContainer(): Pick<HTMLElement, "clientWidth" | "clientHeight">;
     resize(): unknown;
     triggerRepaint(): unknown;
 }

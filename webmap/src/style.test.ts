@@ -92,14 +92,13 @@ function baseStyle(): StyleSpecification {
     };
 }
 
-// Paint map of one layer by id; module-scoped so it is not re-created per
-// test (unicorn/consistent-function-scoping).
-function paintOf(style: StyleSpecification, id: string) {
-    return (
-        style.layers.find((l) => l.id === id) as {
-            paint?: Record<string, unknown>;
-        }
-    ).paint;
+// Paint map of one layer by id, read as a plain record (the style spec types
+// paint per layer type); module-scoped so it is not re-created per test
+// (unicorn/consistent-function-scoping).
+function paintOf(style: StyleSpecification, id: string): Record<string, unknown> | undefined {
+    const layer = style.layers.find((l) => l.id === id);
+    if (layer === undefined) throw new Error(`the style has no layer ${id}`);
+    return layer.paint;
 }
 
 describe("vectorSourceId", () => {
@@ -132,11 +131,7 @@ describe("injectFeatures: 3D buildings", () => {
 
     it("paints the extrusion with the pushed theme colour, semi-transparent", () => {
         const style = injectFeatures(baseStyle(), BUILDINGS);
-        const paint = (
-            style.layers.find((l) => l.id === "femto-3d-buildings") as {
-                paint?: Record<string, unknown>;
-            }
-        ).paint;
+        const paint = paintOf(style, "femto-3d-buildings");
         expect(paint?.["fill-extrusion-color"]).toBe(BUILDINGS.buildingColor);
         expect(paint?.["fill-extrusion-opacity"]).toBe(BUILDING_EXTRUSION_OPACITY);
     });
@@ -296,10 +291,7 @@ describe("injectFeatures: accent recolour", () => {
 
     it("applies no recolour for a plain (non-accent) style", () => {
         const style = injectFeatures(baseStyle(), OFF);
-        const bg = style.layers.find((l) => l.id === "bg") as {
-            paint?: Record<string, unknown>;
-        };
-        expect(bg.paint).toBeUndefined();
+        expect(paintOf(style, "bg")).toBeUndefined();
         expect(paintOf(style, "building")?.["fill-color"]).toBeUndefined();
     });
 });
@@ -324,15 +316,17 @@ describe("roadClassOrNull", () => {
             roadClassOrNull({
                 id: "highway_minor",
                 type: "fill",
+                source: "openmaptiles",
                 "source-layer": "transportation",
-            } as LayerSpecification),
+            }),
         ).toBeNull();
         expect(
             roadClassOrNull({
                 id: "highway_minor",
                 type: "line",
+                source: "openmaptiles",
                 "source-layer": "aeroway",
-            } as LayerSpecification),
+            }),
         ).toBeNull();
     });
 });

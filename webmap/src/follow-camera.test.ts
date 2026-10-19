@@ -9,49 +9,47 @@ import { createFollowEngine, type FollowCameraOpts } from "./follow-camera";
 const FIX = { lat: 35.681, lon: 139.767 };
 
 // The test environment has no DOM, so this class stands in for the
-// HTMLElement global: the detached-mode clone is an instance of it, which
-// passes geoMarkerElement's `instanceof HTMLElement` check, and carries the
-// members geoMarkerElement touches.
+// HTMLElement global (stubbed in beforeEach): the detached-mode clone is an
+// instance of it, which passes geoMarkerElement's `instanceof HTMLElement`
+// check, and carries the members geoMarkerElement touches.
 class StubHTMLElement {
     readonly style: Record<string, string> = {};
     readonly removeAttribute = vi.fn();
 }
 
+// Turn a plain stub into an HTMLElement without a cast: give it the stubbed
+// HTMLElement prototype, then narrow it through the same `instanceof` check
+// production code uses. The stub implements only what the engine touches.
+function asElement<T extends object>(stub: T): T & HTMLElement {
+    Object.setPrototypeOf(stub, StubHTMLElement.prototype);
+    if (!(stub instanceof HTMLElement)) throw new Error("HTMLElement is not stubbed");
+    return stub;
+}
+
 function setup() {
     // The chevron's inline style, recording every property written.
     const styleWrites: string[] = [];
-    const marker = {
-        style: new Proxy(
-            {
-                left: "50%",
-                top: "50%",
-                transform: "",
-                transition: "",
-                display: "none",
-                setProperty: vi.fn(),
-                getPropertyValue: () => "",
-            } as Record<string, unknown>,
-            {
-                set(target, property, value) {
-                    styleWrites.push(String(property));
-                    target[String(property)] = value;
-                    return true;
-                },
+    const style = {
+        left: "50%",
+        top: "50%",
+        transform: "",
+        transition: "",
+        display: "none",
+        setProperty: vi.fn<(name: string, value: string) => void>(),
+        getPropertyValue: () => "",
+    };
+    const marker = asElement({
+        style: new Proxy(style, {
+            set(target, property, value) {
+                styleWrites.push(String(property));
+                return Reflect.set(target, property, value);
             },
-        ) as unknown as {
-            left: string;
-            top: string;
-            transform: string;
-            transition: string;
-            display: string;
-            setProperty: (name: string, value: string) => void;
-            getPropertyValue: (name: string) => string;
-        },
+        }),
         classList: { remove: vi.fn(), toggle: vi.fn(), contains: () => false },
         querySelector: () => null,
         // The detached-mode clone (geoMarkerElement).
         cloneNode: () => new StubHTMLElement(),
-    };
+    });
     const listeners = new Map<string, (ev: { originalEvent?: unknown }) => void>();
     const map = {
         eases: [] as FollowCameraOpts[],
@@ -66,18 +64,18 @@ function setup() {
             listeners.set(type, listener);
         },
         getBearing: () => 0,
-        getContainer: () => ({ clientWidth: 853, clientHeight: 512 }) as HTMLElement,
+        getContainer: () => ({ clientWidth: 853, clientHeight: 512 }),
         resize: vi.fn(),
         triggerRepaint: vi.fn(),
     };
     const engine = createFollowEngine({
         reporter: { log: vi.fn(), report: vi.fn(), reportErrorThrottled: vi.fn() },
-        chevron: { el: marker as unknown as HTMLElement, path: null },
+        chevron: { el: marker, path: null },
         map,
         createGeoMarker: () => ({
             setLngLat: vi.fn(),
             setRotation: vi.fn(),
-            getElement: () => marker as unknown as HTMLElement,
+            getElement: () => marker,
             remove: vi.fn(),
         }),
     });

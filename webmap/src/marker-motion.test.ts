@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { LAYOUT_REFLOW_MS } from "./camera";
+import type { ChevronStyleTarget } from "./chevron";
 import { createMarkerTransition } from "./marker-motion";
 
 // A plain style-bearing stub stands in for the marker element: the helper
 // only ever reads/writes el.style.transition, so a real HTMLElement (and the
 // jsdom environment it would require) adds nothing here.
-function markerStub(): HTMLElement {
-    return { style: { transition: "" } } as unknown as HTMLElement;
+function markerStub(): ChevronStyleTarget {
+    return { style: { left: "", top: "", transform: "", display: "", transition: "" } };
 }
 
 describe("createMarkerTransition", () => {
