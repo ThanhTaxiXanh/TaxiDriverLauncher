@@ -48,7 +48,8 @@ The two backends run different engines — MapLibre's `easeTo` behind `src/follo
 
 The toolchain is Vite+ (`vite-plus`, the `vp` CLI): `vp build` owns emit, `vp test` runs the bundled Vitest, and `vp check` runs oxfmt + oxlint. All Vite+ configuration lives in `vite.config.ts` (build, `test`, and `lint` blocks — the Vite+ docs deprecate separate `.oxlintrc.json` files).
 
-- `tsc` is type-check-only: `tsc --noEmit` runs inside `pnpm run check`. `vp build` owns emit and ignores the tsconfig `target`. (The tsgolint `typeAware`/`typeCheck` pair is a coupled future decision — see the comment in `vite.config.ts`.)
+- `tsc` is type-check-only: `tsc --noEmit` runs inside `pnpm run check`. `vp build` owns emit and ignores the tsconfig `target`.
+- `vp lint` / `vp check` run the type-aware rules (`lint.options.typeAware`; tsgolint ships with vite-plus). Fix a finding in code, not with a suppression: a cast at the window / bridge boundary becomes a declaration (`FemtoBridge` in `bridge.ts`, merged per backend) or a type guard, and a test double gets a narrowed signature or an `instanceof`-checked stub. `lint.options.typeCheck` is a separate switch and stays off, since `tsc --noEmit` already type-checks (see the comment in `vite.config.ts`).
 - `build.target` in `vite.config.ts` is the sole shipped-syntax floor. Never raise it above the Android 13 factory-WebView floor (AGENTS.md#tech-stack). A TypeScript compiler swap therefore structurally cannot move the floor.
 - oxfmt follows the root `.editorconfig` (4-space indent — the repo-wide formatting SSOT the retired Biome config used to override with tabs).
 - `let`/`var` are banned (const holders for mutable state): the eslint core rules plus the `femto/no-let` Oxlint JS plugin in `webmap/no-let.js`, wired via the `lint.jsPlugins` block.

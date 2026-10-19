@@ -47,14 +47,16 @@ export default defineConfig({
             correctness: "error",
             suspicious: "error",
         },
-        // Type checking stays an explicit `tsc --noEmit` in the check script
-        // (the same shape `vp migrate` generates). The alternative —
-        // options.typeAware + options.typeCheck (tsgolint) — is coupled: the
-        // type-aware RULE set comes with the type CHECK, and it outlaws the
-        // deliberate boundary casts and defensive conversions the bridge code
-        // is built on (e.g. no-unsafe-type-assertion on the window/UMD
-        // accessors) — a stricter contract than the Biome-parity this
-        // migration keeps. Enabling it is a deliberate future decision.
+        // options.typeAware adds the type-aware rules of the enabled
+        // categories (e.g. no-floating-promises, no-unsafe-type-assertion),
+        // run by tsgolint on TypeScript 7; vite-plus ships tsgolint with its
+        // Oxlint. Fix a finding in code rather than suppressing it: casts at
+        // the window/bridge and test-double boundaries became declarations,
+        // type guards and narrowed signatures. options.typeCheck is a separate
+        // switch and stays off: type checking remains the explicit
+        // `tsc --noEmit` in the check script (the shape `vp migrate`
+        // generates).
+        options: { typeAware: true },
         rules: {
             "eslint/no-var": "error",
             "eslint/prefer-const": "error",
