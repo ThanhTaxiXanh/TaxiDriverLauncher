@@ -8,6 +8,7 @@ import io.github.seijikohara.femto.data.display.UiScale
 import io.github.seijikohara.femto.testfixtures.DashboardFixtures
 import io.github.seijikohara.femto.testfixtures.DashboardGeometries
 import io.github.seijikohara.femto.testfixtures.MapBackdrop
+import io.github.seijikohara.femto.testfixtures.RobolectricHaze
 import io.github.seijikohara.femto.testfixtures.ScreenshotCompareOptions
 import io.github.seijikohara.femto.ui.home.components.DashboardScaffold
 import io.github.seijikohara.femto.ui.home.components.GlassConfig
@@ -36,9 +37,9 @@ import org.robolectric.annotation.GraphicsMode
  *
  * Pinned to `sdk = 33` like the other Robolectric tests (sidesteps the compileSdk
  * gap). `location = null` keeps the map on its static fallback (no MapLibre GL).
- * Caveats baked into the goldens: Robolectric's software rasterizer does not render
- * the Haze RenderEffect blur (the glass overlays show their tint, not the frost),
- * and downloadable Google Fonts fall back to the system face — both deterministic.
+ * Caveats baked into the goldens: the glass overlays render without Haze's noise
+ * grain ([RobolectricHaze] explains why), and downloadable Google Fonts fall back
+ * to the system face — both deterministic.
  * Goldens must be recorded on the CI OS (Linux) so verifyRoborazziStableDebug matches; a
  * small changeThreshold absorbs residual sub-pixel antialiasing differences.
  */
@@ -139,22 +140,24 @@ class DashboardScreenshotTest {
             filePath = "src/test/screenshots/dashboard-$name.png",
             roborazziOptions = ScreenshotCompareOptions,
         ) {
-            FemtoTheme(uiScale = uiScale, darkTheme = darkTheme) {
-                DashboardScaffold(
-                    uiState = DashboardFixtures.state,
-                    is24Hour = true,
-                    showClockSeconds = true,
-                    speedUnit = SpeedUnit.KILOMETERS_PER_HOUR,
-                    temperatureUnit = TemperatureUnit.CELSIUS,
-                    mapConfig = MapConfig(),
-                    panels = PanelVisibility(),
-                    glassConfig = GlassConfig(),
-                    onAction = {},
-                    modifier = Modifier.fillMaxSize(),
-                    driverSide = driverSide,
-                    clock = DashboardFixtures.fixedClock,
-                    mapSurface = { _, config -> MapBackdrop(darkTheme = darkTheme, mapConfig = config) },
-                )
+            RobolectricHaze {
+                FemtoTheme(uiScale = uiScale, darkTheme = darkTheme) {
+                    DashboardScaffold(
+                        uiState = DashboardFixtures.state,
+                        is24Hour = true,
+                        showClockSeconds = true,
+                        speedUnit = SpeedUnit.KILOMETERS_PER_HOUR,
+                        temperatureUnit = TemperatureUnit.CELSIUS,
+                        mapConfig = MapConfig(),
+                        panels = PanelVisibility(),
+                        glassConfig = GlassConfig(),
+                        onAction = {},
+                        modifier = Modifier.fillMaxSize(),
+                        driverSide = driverSide,
+                        clock = DashboardFixtures.fixedClock,
+                        mapSurface = { _, config -> MapBackdrop(darkTheme = darkTheme, mapConfig = config) },
+                    )
+                }
             }
         }
     }
