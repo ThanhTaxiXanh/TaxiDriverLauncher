@@ -120,7 +120,7 @@ spotless {
 }
 
 android {
-    namespace = "io.github.seijikohara.femto"
+    namespace = "com.taxidriver.launcher"
     // compileSdk 37: androidx.core(-ktx) 1.19.0 requires compiling against API 37+.
     // minSdk stays 33 (Android 13) and targetSdk stays 36 — only the compile
     // target advances, not the supported-device floor or the runtime opt-in.
@@ -133,7 +133,7 @@ android {
     ndkVersion = libs.versions.ndk.get()
 
     defaultConfig {
-        applicationId = "io.github.seijikohara.femto"
+        applicationId = "com.taxidriver.launcher"
         minSdk = 33
         targetSdk = 36
         // CI injects versionCode/versionName: .github/actions/app-version
@@ -314,6 +314,8 @@ aboutLibraries {
 }
 
 dependencies {
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-projected:1.7.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.material)
