@@ -319,6 +319,8 @@ aboutLibraries {
 
 dependencies {
     implementation("com.mapbox.extension:maps-androidauto:11.30.0")
+    // Match Mapbox Maps 11.30.0; NDK27 variant for 16-KB page compatibility.
+    implementation("com.mapbox.navigationcore:navigation-ndk27:3.30.0")
     implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.car.app:app-projected:1.7.0")
     implementation(libs.androidx.core.ktx)
