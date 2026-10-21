@@ -35,6 +35,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.MapboxExperimental
 import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.Style
 import com.mapbox.maps.EdgeInsets
@@ -73,6 +74,7 @@ private class DriverSession : Session() {
     override fun onCreateScreen(intent: Intent): Screen = DriverMapScreen(mapboxCarMap)
 }
 
+@OptIn(MapboxExperimental::class)
 private class DriverMapScreen(private val carMap: MapboxCarMap) :
     Screen(carMap.carContext), DefaultLifecycleObserver {
     private val locationManager =
@@ -83,6 +85,15 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var tracking = false
     private var lastBearing = 0.0
     private var previousFix: Location? = null
+    private val gpsSpeedFilter = GpsSpeedFilter()
+    private var speedWidget: DrivingSpeedWidget? = null
+    private var speedRefreshActive = false
+    private val speedRefresh = object : Runnable {
+        override fun run() {
+            refreshSpeedHud()
+            if (speedRefreshActive) mainHandler.postDelayed(this, 1_000L)
+        }
+    }
     private var styleReady = false
     private var cameraInitialized = false
     private var gpsState = "Waiting for GPS"
@@ -120,11 +131,19 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private val mapObserver = object : MapboxCarMapObserver {
         override fun onAttached(mapboxCarMapSurface: MapboxCarMapSurface) {
             attachedSurface = mapboxCarMapSurface
+            // A MapSurface widget is independent of the tilted/rotating map.
+            // Keep the display reserved for GPS speed only.
+            val widget = DrivingSpeedWidget(isNightInVietnam())
+            speedWidget = widget
+            mapboxCarMapSurface.mapSurface.addWidget(widget)
+            refreshSpeedHud()
             loadDrivingStyle(mapboxCarMapSurface)
         }
 
         override fun onDetached(mapboxCarMapSurface: MapboxCarMapSurface) {
             if (attachedSurface === mapboxCarMapSurface) {
+                speedWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
+                speedWidget = null
                 attachedSurface = null
                 styleReady = false
                 cameraInitialized = false
@@ -190,6 +209,12 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             latestLocation = location
             if (gpsState != "GPS active") reportStatus("GPS active")
             lastAcceptedElapsedNanos = SystemClock.elapsedRealtimeNanos()
+            gpsSpeedFilter.accept(
+                if (location.hasSpeed()) location.speed else null,
+                if (location.hasSpeedAccuracy()) location.speedAccuracyMetersPerSecond else null,
+                location.elapsedRealtimeNanos / 1_000_000L,
+            )
+            refreshSpeedHud()
             updateCamera(location)
             maybeLookupRoad(location)
         }
@@ -199,6 +224,23 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         mapboxMapInstaller(carMap).onResumed(mapObserver).install()
         lifecycle.addObserver(this)
         mainHandler.post(themeCheck)
+    }
+
+    private fun refreshSpeedHud() {
+        speedWidget?.update(gpsSpeedFilter.kmh(SystemClock.elapsedRealtime()), isNightInVietnam())
+    }
+
+    private fun startSpeedRefresh() {
+        if (speedRefreshActive) return
+        speedRefreshActive = true
+        mainHandler.post(speedRefresh)
+    }
+
+    private fun stopSpeedRefresh() {
+        speedRefreshActive = false
+        mainHandler.removeCallbacks(speedRefresh)
+        gpsSpeedFilter.reset()
+        refreshSpeedHud()
     }
 
     /** Reject stale or implausible location data before it reaches the map. */
@@ -348,10 +390,12 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     }
 
     override fun onStart(owner: LifecycleOwner) {
+        startSpeedRefresh()
         startTracking()
     }
 
     override fun onResume(owner: LifecycleOwner) {
+        startSpeedRefresh()
         // A projected Android Auto screen can attach its map after the service
         // starts; retry registration when the screen becomes interactive.
         startTracking()
@@ -394,6 +438,12 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 .firstOrNull(::acceptFix)?.let { fix ->
                     previousFix = fix
                     latestLocation = fix
+                    gpsSpeedFilter.accept(
+                        if (fix.hasSpeed()) fix.speed else null,
+                        if (fix.hasSpeedAccuracy()) fix.speedAccuracyMetersPerSecond else null,
+                        fix.elapsedRealtimeNanos / 1_000_000L,
+                    )
+                    refreshSpeedHud()
                     updateCamera(fix)
                 }
         } catch (exception: SecurityException) {
@@ -416,12 +466,14 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        stopSpeedRefresh()
         stopTracking()
         if (lastAcceptedElapsedNanos != 0L) gpsState = "GPS paused"
     }
 
     override fun onDestroy(owner: LifecycleOwner) {
         stopTracking()
+        stopSpeedRefresh()
         mainHandler.removeCallbacks(themeCheck)
         lifecycle.removeObserver(this)
     }
