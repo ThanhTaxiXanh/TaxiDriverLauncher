@@ -240,10 +240,11 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         val offset = (height * 0.40).coerceAtLeast(0.0)
         // A map-aligned icon is oriented to geographical north. Rotate it to
         // the filtered vehicle bearing; the map camera uses that same bearing.
-        map.getStyle()?.getLayer(layerId)?.let {
-            // Set marker rotation using the same filtered GPS bearing as camera.
-            map.getStyle()?.setStyleLayerProperty(layerId, "icon-rotate", com.mapbox.bindgen.Value(lastBearing))
-        }
+        // Map-aligned icon rotation is geographical; use the filtered vehicle
+        // bearing directly so it aligns with the camera-follow heading.
+        map.getStyle()?.setStyleLayerProperty(
+            layerId, "icon-rotate", com.mapbox.bindgen.Value(lastBearing),
+        )
         map.setCamera(
             CameraOptions.Builder()
                 .center(point)
