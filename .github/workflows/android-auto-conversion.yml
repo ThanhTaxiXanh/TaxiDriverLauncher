@@ -1,0 +1,39 @@
+name: Android Auto conversion
+on:
+  push:
+    branches:
+      - feature/android-auto-conversion
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  migrate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Migrate all first-party Kotlin packages and source paths
+        run: python3 .github/scripts/migrate-package.py
+      - name: Commit migration on feature branch only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src app/build.gradle.kts
+          if ! git diff --cached --quiet; then
+            git commit -m "Migrate Kotlin sources to com.taxidriver.launcher"
+            git push origin HEAD:feature/android-auto-conversion
+          fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build Android Auto debug APK
+        run: ./gradlew :app:assembleStableDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: taxi-driver-android-auto-debug
+          path: app/build/outputs/apk/stable/debug/*.apk
+          if-no-files-found: error
