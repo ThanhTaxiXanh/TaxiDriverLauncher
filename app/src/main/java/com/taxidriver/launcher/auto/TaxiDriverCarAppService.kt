@@ -133,22 +133,24 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         lifecycle.addObserver(this)
     }
 
-    /** Reject old/out-of-order fixes, huge accuracy circles, and impossible jumps. */
+    /** Reject stale or implausible location data before it reaches the map. */
     private fun acceptFix(fix: Location): Boolean {
-        if (fix.isFromMockProvider || !fix.hasAccuracy() || fix.accuracy > 100f) {
-            Log.d("TaxiDriverAuto", "GPS rejected: mock or inaccurate fix")
-            return false
+        if (fix.isFromMockProvider) return false
+        val old = previousFix
+        val delta = old?.let {
+            (fix.elapsedRealtimeNanos - it.elapsedRealtimeNanos) / 1_000_000_000.0
         }
-        if (fix.latitude !in -90.0..90.0 || fix.longitude !in -180.0..180.0) return false
-        val ageMillis = (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000L
-        if (ageMillis !in 0..15_000L) {
-            Log.d("TaxiDriverAuto", "GPS rejected: stale fix age=$ageMillis ms")
-            return false
-        }
-        val old = previousFix ?: return true
-        val dt = (fix.elapsedRealtimeNanos - old.elapsedRealtimeNanos) / 1_000_000_000.0
-        if (dt <= 0.0) return false
-        return old.distanceTo(fix) / dt < 75.0
+        val distance = old?.distanceTo(fix)
+        val valid = GpsFixPolicy.isAcceptable(
+            if (fix.hasAccuracy()) fix.accuracy else null,
+            fix.latitude,
+            fix.longitude,
+            (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000L,
+            delta,
+            distance,
+        )
+        if (!valid) Log.d("TaxiDriverAuto", "Rejected invalid or stale location fix")
+        return valid
     }
 
     private fun updateCamera(location: Location) {
