@@ -4,7 +4,6 @@ import android.content.Intent
 import androidx.car.app.CarAppService
 import androidx.car.app.Screen
 import androidx.car.app.Session
-import androidx.car.app.model.CarText
 import androidx.car.app.model.Pane
 import androidx.car.app.model.PaneTemplate
 import androidx.car.app.model.Row
@@ -38,7 +37,7 @@ class TaxiDriverCarAppService : CarAppService() {
                         )
                         .build()
                     return PaneTemplate.Builder(pane)
-                        .setTitle(CarText.create("Taxi Driver"))
+                        .setTitle("Taxi Driver")
                         .build()
                 }
             }
