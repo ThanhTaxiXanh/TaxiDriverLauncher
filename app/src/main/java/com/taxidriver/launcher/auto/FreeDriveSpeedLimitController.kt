@@ -19,6 +19,7 @@ import com.mapbox.common.location.Location
  */
 internal class FreeDriveSpeedLimitController(
     private val context: Context,
+    private val onRoadMatch: (names: List<String>, reliable: Boolean) -> Unit,
     private val onLimit: (value: Int?, unit: RoadSpeedUnit, onRoad: Boolean, reliable: Boolean) -> Unit,
 ) {
     private var navigation: MapboxNavigation? = null
@@ -28,6 +29,12 @@ internal class FreeDriveSpeedLimitController(
         override fun onNewRawLocation(rawLocation: Location) = Unit
 
         override fun onNewLocationMatcherResult(locationMatcherResult: LocationMatcherResult) {
+            onRoadMatch(
+                locationMatcherResult.road.components.map { it.text }.filter { it.isNotBlank() },
+                !locationMatcherResult.isOffRoad &&
+                    !locationMatcherResult.isDegradedMapMatching &&
+                    locationMatcherResult.roadEdgeMatchProbability >= 0.70f,
+            )
             val speedLimit = locationMatcherResult.speedLimitInfo
             val unit = when (speedLimit.unit) {
                 SpeedUnit.KILOMETERS_PER_HOUR -> RoadSpeedUnit.KMH
@@ -78,6 +85,7 @@ internal class FreeDriveSpeedLimitController(
         navigation = null
         ownsNavigation = false
         started = false
+        onRoadMatch(emptyList(), false)
         onLimit(null, RoadSpeedUnit.UNKNOWN, false, false)
     }
 }
