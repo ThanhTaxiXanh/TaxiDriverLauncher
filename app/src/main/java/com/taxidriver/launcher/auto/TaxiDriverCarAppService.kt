@@ -10,6 +10,8 @@ import android.location.LocationManager
 import android.location.Geocoder
 import android.os.Handler
 import java.util.Locale
+import java.time.LocalTime
+import java.time.ZoneId
 import android.os.Looper
 import android.os.SystemClock
 import androidx.car.app.CarToast
@@ -90,6 +92,23 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private val roadSourceId = "taxi-driver-street-chip"
     private val roadLayerId = "taxi-driver-street-label"
     private var roadRequestId = 0
+    private var activeNightMode: Boolean? = null
+    private val vietnamTime = ZoneId.of("Asia/Ho_Chi_Minh")
+    private val themeCheck = object : Runnable {
+        override fun run() {
+            refreshThemeIfNeeded()
+            mainHandler.postDelayed(this, 30_000L)
+        }
+    }
+    private fun isNightInVietnam(): Boolean {
+        val hour = LocalTime.now(vietnamTime).hour
+        return hour < 6 || hour >= 18
+    }
+    private fun refreshThemeIfNeeded() {
+        val surface = attachedSurface ?: return
+        val night = isNightInVietnam()
+        if (activeNightMode != night) loadDrivingStyle(surface)
+    }
     private val markerBitmap by lazy { createVehicleMarker() }
     private val markerId = "taxi-driver-location"
     private val sourceId = "taxi-driver-gps-source"
@@ -98,26 +117,37 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private val mapObserver = object : MapboxCarMapObserver {
         override fun onAttached(mapboxCarMapSurface: MapboxCarMapSurface) {
             attachedSurface = mapboxCarMapSurface
-            styleReady = false
-            cameraInitialized = false
-            // Streets uses higher road/label contrast than the previous near-black DARK style.
-            mapboxCarMapSurface.mapSurface.getMapboxMap().loadStyle(
-                style(Style.MAPBOX_STREETS) {
-                    +image(markerId, markerBitmap)
+            loadDrivingStyle(mapboxCarMapSurface)
+        }
+
+        override fun onDetached(mapboxCarMapSurface: MapboxCarMapSurface) {
+            if (attachedSurface === mapboxCarMapSurface) {
+                attachedSurface = null
+                styleReady = false
+                cameraInitialized = false
+            }
+        }
+    }
+
+    /** Recreates custom sources/layers on every light/dark style transition. */
+    private fun loadDrivingStyle(surface: MapboxCarMapSurface) {
+        val night = isNightInVietnam()
+        activeNightMode = night
+        styleReady = false
+        cameraInitialized = false
+        surface.mapSurface.getMapboxMap().loadStyle(
+            style(if (night) Style.DARK else Style.MAPBOX_STREETS) {
+                +image(markerId, markerBitmap)
                     // An empty source prevents a phantom marker at the equator.
                     +geoJsonSource(sourceId) {
                         featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
                     }
-                    +symbolLayer(layerId, sourceId) {
-                        iconImage(markerId)
-                        iconAllowOverlap(true)
-                    }
                     +fillExtrusionLayer("taxi-driver-buildings-3d", "composite") {
                         sourceLayer("building")
                         minZoom(15.0)
-                        fillExtrusionColor("#b0becb")
-                        fillExtrusionOpacity(0.80)
-                        fillExtrusionHeight(12.0)
+                        fillExtrusionColor(if (isNightInVietnam()) "#68788a" else "#aab8c8")
+                        fillExtrusionOpacity(0.43)
+                        fillExtrusionHeight(7.0)
                         fillExtrusionBase(0.0)
                     }
                     +geoJsonSource(roadSourceId) {
@@ -126,28 +156,24 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                     +symbolLayer(roadLayerId, roadSourceId) {
                         textField(get { literal("name") })
                         textSize(14.0)
-                        textColor("#152e4b")
-                        textHaloColor("#ffffff")
-                        textHaloWidth(2.0)
+                        textColor(if (isNightInVietnam()) "#ffffff" else "#152e4b")
+                        textHaloColor(if (isNightInVietnam()) "#17304a" else "#ffffff")
+                        textHaloWidth(2.5)
                         textOffset(listOf(0.0, 4.0))
                         textAllowOverlap(true)
                     }
-                },
-            ) {
-                if (attachedSurface === mapboxCarMapSurface) {
-                    styleReady = true
-                    Log.i("TaxiDriverAuto", "Mapbox style ready; GPS state: $gpsState")
-                    latestLocation?.let(::updateCamera)
-                    updateRoadLabel()
-                }
-            }
-        }
-
-        override fun onDetached(mapboxCarMapSurface: MapboxCarMapSurface) {
-            if (attachedSurface === mapboxCarMapSurface) {
-                attachedSurface = null
-                styleReady = false
-                cameraInitialized = false
+                    // The puck is declared last so it paints over 3D buildings.
+                    +symbolLayer(layerId, sourceId) {
+                        iconImage(markerId)
+                        iconAllowOverlap(true)
+                    }
+            },
+        ) {
+            if (attachedSurface === surface && activeNightMode == night) {
+                styleReady = true
+                Log.i("TaxiDriverAuto", "Mapbox style ready: night=$night")
+                latestLocation?.let(::updateCamera)
+                updateRoadLabel()
             }
         }
     }
@@ -166,6 +192,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     init {
         mapboxMapInstaller(carMap).onResumed(mapObserver).install()
         lifecycle.addObserver(this)
+        mainHandler.post(themeCheck)
     }
 
     /** Reject stale or implausible location data before it reaches the map. */
@@ -209,14 +236,14 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             CameraOptions.Builder()
                 .center(point)
                 .padding(EdgeInsets(offset, 0.0, 0.0, 0.0))
-                .zoom(17.5)
+                .zoom(18.0)
                 .bearing(lastBearing)
-                .pitch(40.0)
+                .pitch(70.0)
                 .build(),
         )
         if (!cameraInitialized) {
             cameraInitialized = true
-            Log.i("TaxiDriverAuto", "Initial camera locked to GPS; zoom=17.5")
+            Log.i("TaxiDriverAuto", "Initial camera locked to GPS; zoom=18.0")
         }
     }
 
@@ -287,6 +314,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         // A projected Android Auto screen can attach its map after the service
         // starts; retry registration when the screen becomes interactive.
         startTracking()
+        refreshThemeIfNeeded()
         latestLocation?.let(::updateCamera)
     }
 
@@ -353,6 +381,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
 
     override fun onDestroy(owner: LifecycleOwner) {
         stopTracking()
+        mainHandler.removeCallbacks(themeCheck)
         lifecycle.removeObserver(this)
     }
 
