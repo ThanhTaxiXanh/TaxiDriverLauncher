@@ -54,9 +54,10 @@ internal class FreeDriveSpeedLimitController(
             } else {
                 MapboxNavigationProvider.retrieve()
             }
+            // Track ownership before registering, so failures still clean up.
+            navigation = nav
             nav.registerLocationObserver(observer)
             nav.startTripSession()
-            navigation = nav
             started = true
         } catch (e: Exception) {
             Log.w("TaxiDriverAuto", "Free-drive map matching unavailable", e)
