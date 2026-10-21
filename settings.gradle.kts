@@ -19,6 +19,16 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://api.mapbox.com/downloads/v2/releases/maven")
+            credentials {
+                username = "mapbox"
+                password = providers.environmentVariable("MAPBOX_DOWNLOADS_TOKEN").orElse("").get()
+            }
+            authentication {
+                create<org.gradle.authentication.http.BasicAuthentication>("basic")
+            }
+        }
         // Node.js distribution for the node-gradle plugin (download = true).
         // FAIL_ON_PROJECT_REPOS forbids the repository the plugin would add
         // itself, so it is declared here instead (the plugin's documented
