@@ -45,6 +45,8 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.getSourceAs
 import com.mapbox.maps.extension.style.layers.generated.symbolLayer
+import com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment
+import com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment
 import com.mapbox.maps.extension.style.layers.generated.fillExtrusionLayer
 import com.mapbox.maps.extension.style.expressions.dsl.generated.get
 import com.mapbox.maps.extension.style.expressions.dsl.generated.literal
@@ -166,6 +168,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                     +symbolLayer(layerId, sourceId) {
                         iconImage(markerId)
                         iconAllowOverlap(true)
+                        iconPitchAlignment(IconPitchAlignment.MAP)
+                        iconRotationAlignment(IconRotationAlignment.MAP)
+                        iconRotate(0.0)
                     }
             },
         ) {
@@ -232,13 +237,16 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         // Mapbox positioning depends on the connected host viewport dimensions.
         val height = attachedSurface?.surfaceContainer?.height?.toDouble() ?: 0.0
         val offset = (height * 0.24).coerceAtLeast(0.0)
+        // In MAP rotation alignment, icon angle is relative to map north.
+        // Camera bearing rotates the map, so zero means forward/up on screen
+        // when the camera follows the filtered vehicle heading.
         map.setCamera(
             CameraOptions.Builder()
                 .center(point)
                 .padding(EdgeInsets(offset, 0.0, 0.0, 0.0))
                 .zoom(18.0)
                 .bearing(lastBearing)
-                .pitch(70.0)
+                .pitch(65.0)
                 .build(),
         )
         if (!cameraInitialized) {
