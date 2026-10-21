@@ -32,25 +32,22 @@ import {
 
 setWorkerUrl(maplibreWorkerUrl);
 
-// The OSM bridge extends the base femtoBridge with the host-supplied endpoints,
-// read synchronously before the map is constructed (the same shape as the
-// Google backend's key getters). Absent outside the launcher (`vp dev`), where
-// the upstream defaults apply.
-interface OsmFemtoBridge {
-    onMapEvent(kind: string, detail: string): void;
-    // The origin that serves tiles, styles, sprites and glyphs in the upstream
-    // layout; every request under UPSTREAM_TILE_HOST is re-pointed at it.
-    tileHost(): string;
-    // The raster-DEM TileJSON injected while terrain is on.
-    terrainTileJsonUrl(): string;
-    // The style to construct the map with — the bundled base for the scheme the
-    // host will push, so a cold start fetches no hosted style it is about to
-    // replace.
-    initialStyleUrl(): string;
-}
-
-function osmBridge(): OsmFemtoBridge | undefined {
-    return window.femtoBridge as OsmFemtoBridge | undefined;
+// The OSM getters on the femtoBridge (see bridge.ts): the host-supplied
+// endpoints, read synchronously before the map is constructed (the same shape
+// as the Google backend's key getters). The bridge is absent outside the
+// launcher (`vp dev`), where the upstream defaults apply.
+declare global {
+    interface FemtoBridge {
+        // The origin that serves tiles, styles, sprites and glyphs in the upstream
+        // layout; every request under UPSTREAM_TILE_HOST is re-pointed at it.
+        tileHost(): string;
+        // The raster-DEM TileJSON injected while terrain is on.
+        terrainTileJsonUrl(): string;
+        // The style to construct the map with — the bundled base for the scheme
+        // the host will push, so a cold start fetches no hosted style it is
+        // about to replace.
+        initialStyleUrl(): string;
+    }
 }
 
 const DEFAULT_STYLE_URL = `${UPSTREAM_TILE_HOST}/styles/positron`;
@@ -82,7 +79,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
 
     // Host-supplied endpoints, read once: they are fixed for the page's life
     // (a change on the Kotlin side rebuilds the WebView).
-    const bridge = osmBridge();
+    const bridge = window.femtoBridge;
     const tileHost = bridge?.tileHost() || UPSTREAM_TILE_HOST;
     const terrainUrl = bridge?.terrainTileJsonUrl() || "";
     const initialStyleUrl = bridge?.initialStyleUrl() || DEFAULT_STYLE_URL;
@@ -159,7 +156,8 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
             reporter,
         });
 
-        // The one positive signal that the tile host is answering. NOT
+        // The one positive signal that the tile host is answering, and so the
+        // one the watchdog reports to the host as the page's success. NOT
         // `isSourceLoaded`: a raster source declared with an inline tiles array
         // (the bundled light style's relief layer) reports itself loaded the
         // moment it is added, without a single request leaving the device.
@@ -171,7 +169,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         // them (transient by definition — never UI, never a backend switch)
         // unless one of the two outcome-gated fatals above concludes otherwise.
         liveMap.on("error", (e) => {
-            const detail = String(e?.error?.message || "unknown map error");
+            const detail = e?.error?.message || "unknown map error";
             const status = requestStatusOf(e?.error);
             log(`error: ${detail}`);
             reportErrorThrottled(detail);
@@ -191,6 +189,8 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
                             terrainUrl: terrainUrl,
                         }),
                 });
+                // Only from here do tiles belong to the swapped-in style.
+                noTileWatchdog.onStyleApplied();
             }
         }
 
@@ -233,7 +233,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
                     el.style.opacity = "1";
                     el.style.display = "block";
                 } catch (e) {
-                    log(`style-fade capture failed: ${e instanceof Error ? e.message : e}`);
+                    log(`style-fade capture failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
                 setTimeout(() => {
                     if (gen !== state.styleFadeGen) return;
@@ -334,7 +334,7 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
                 noTileWatchdog.onStyleSwap();
             }
             state.currentStyleUrl = url;
-            setPageAttribution(!!pageAttribution);
+            setPageAttribution(pageAttribution);
             state.accentColors = bg
                 ? {
                       background: bg,
@@ -353,8 +353,8 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         // theme-tracked extrusion colour), then re-apply the style so
         // transformStyle injects (or omits) the matching layers/sources.
         window.setFeatures = (buildings, terrain, buildingColor) => {
-            state.buildings = !!buildings;
-            state.terrain = !!terrain;
+            state.buildings = buildings;
+            state.terrain = terrain;
             state.buildingColor = buildingColor || "";
             applyStyleWithFade();
         };
@@ -368,8 +368,11 @@ export function init(reporter: PageReporter, pending: PendingBridgeCalls): void 
         if (pending.updateCamera) window.updateCamera(...pending.updateCamera);
         if (pending.onHostResume) window.onHostResume();
     } catch (e) {
-        log(`exception:${e instanceof Error ? e.message : e}`);
+        log(`exception:${e instanceof Error ? e.message : String(e)}`);
         // The map object never came up; this page will stay blank forever.
-        report("fatal", `map-init-exception: ${e instanceof Error ? e.message : e}`.slice(0, 200));
+        report(
+            "fatal",
+            `map-init-exception: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200),
+        );
     }
 }

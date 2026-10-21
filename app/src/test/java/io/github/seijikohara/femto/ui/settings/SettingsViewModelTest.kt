@@ -37,6 +37,8 @@ import io.github.seijikohara.femto.testfixtures.FakeLocationSettingsStore
 import io.github.seijikohara.femto.testfixtures.FakeTrackLogPort
 import io.github.seijikohara.femto.testfixtures.FakeUpdateSettingsStore
 import io.github.seijikohara.femto.testfixtures.FakeUpdaterPort
+import io.github.seijikohara.femto.testfixtures.FakeVideoSettingsStore
+import io.github.seijikohara.femto.testfixtures.FakeVideoSourceGrants
 import io.github.seijikohara.femto.testfixtures.fakeCalendarInfo
 import io.github.seijikohara.femto.testfixtures.fakeUpdateManifest
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +64,9 @@ import org.junit.Test
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 // Pure JVM: every collaborator is an in-memory fake, so there is no DataStore IO
 // and the test is fully driven by the StandardTestDispatcher.
@@ -1315,6 +1319,80 @@ class SettingsViewModelTest {
         }
 
     @Test
+    fun `a skipped offer is still named, marked skipped, and raises no category dot`() =
+        runTest(dispatcher) {
+            updateStore.setSkippedVersionCode(manifest.versionCode)
+
+            val updates = updatesFor(UpdateState.Available(manifest))
+
+            assertEquals(
+                AvailableVersion.Offered(manifest.versionName, manifest.apk.size, skipped = true),
+                updates.availableVersion,
+            )
+            assertEquals(downloadStep(), updates.step)
+            assertFalse(updates.canSkip)
+            assertFalse(updates.updateOffered)
+        }
+
+    @Test
+    fun `a newer build than the skipped one is offered as usual`() =
+        runTest(dispatcher) {
+            updateStore.setSkippedVersionCode(manifest.versionCode - 1)
+
+            val updates = updatesFor(UpdateState.Available(manifest))
+
+            assertEquals(AvailableVersion.Offered(manifest.versionName, manifest.apk.size), updates.availableVersion)
+            assertTrue(updates.canSkip)
+            assertTrue(updates.updateOffered)
+        }
+
+    @Test
+    fun `discard shows only while a verified download is staged`() =
+        runTest(dispatcher) {
+            mapOf(
+                UpdateState.Available(manifest) to false,
+                UpdateState.Downloading(manifest, fraction = 0.5f) to false,
+                UpdateState.Ready(manifest, File("update.apk")) to true,
+                installingWithConfirmation() to false,
+                UpdateState.Failed(UpdateFailure.INSTALL_BLOCKED, manifest, staged = true) to true,
+                UpdateState.Failed(UpdateFailure.NETWORK, manifest) to false,
+                UpdateState.UpToDate to false,
+            ).forEach { (state, canDiscard) ->
+                assertEquals(canDiscard, updatesFor(state).canDiscard, "canDiscard for $state")
+            }
+        }
+
+    @Test
+    fun `skip shows while an offer waits for the user`() =
+        runTest(dispatcher) {
+            mapOf(
+                UpdateState.Available(manifest) to true,
+                UpdateState.Downloading(manifest, fraction = 0.5f) to false,
+                UpdateState.Ready(manifest, File("update.apk")) to true,
+                installingWithConfirmation() to false,
+                UpdateState.Failed(UpdateFailure.NETWORK, manifest) to true,
+                UpdateState.Failed(UpdateFailure.INSTALL_CONFLICT, manifest = null) to false,
+                UpdateState.UpToDate to false,
+            ).forEach { (state, canSkip) ->
+                assertEquals(canSkip, updatesFor(state).canSkip, "canSkip for $state")
+            }
+        }
+
+    @Test
+    fun `DiscardUpdate and SkipUpdate reach the updater, whatever the motion`() =
+        runTest(dispatcher) {
+            motion.value = VehicleMotion.MOVING
+            val vm = viewModel()
+
+            vm.onAction(SettingsAction.DiscardUpdate)
+            vm.onAction(SettingsAction.SkipUpdate)
+            advanceUntilIdle()
+
+            assertEquals(1, updater.discards)
+            assertEquals(1, updater.skips)
+        }
+
+    @Test
     fun `CheckForUpdates asks the updater to check, whatever the motion`() =
         runTest(dispatcher) {
             motion.value = VehicleMotion.MOVING
@@ -1441,6 +1519,9 @@ class SettingsViewModelTest {
         updater = updaterPort,
         updatePreferences = updateStore,
         motion = motion,
+        videoPreferences = FakeVideoSettingsStore(),
+        videoGrants = FakeVideoSourceGrants(),
+        ioDispatcher = dispatcher,
     )
 
     private companion object {

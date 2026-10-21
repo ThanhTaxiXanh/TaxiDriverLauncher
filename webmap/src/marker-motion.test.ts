@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { LAYOUT_REFLOW_MS } from "./camera";
+import type { ChevronStyleTarget } from "./chevron";
 import { createMarkerTransition } from "./marker-motion";
 
 // A plain style-bearing stub stands in for the marker element: the helper
 // only ever reads/writes el.style.transition, so a real HTMLElement (and the
 // jsdom environment it would require) adds nothing here.
-function markerStub(): HTMLElement {
-    return { style: { transition: "" } } as unknown as HTMLElement;
+function markerStub(): ChevronStyleTarget {
+    return { style: { left: "", top: "", transform: "", display: "", transition: "" } };
 }
 
 describe("createMarkerTransition", () => {
@@ -70,5 +71,21 @@ describe("createMarkerTransition", () => {
 
         vi.advanceTimersByTime(LAYOUT_REFLOW_MS);
         expect(marker.style.transition).toBe("");
+    });
+
+    it("counts down the time an armed transition has left, and reads 0 once it is cleared", () => {
+        const marker = markerStub();
+        const transition = createMarkerTransition(marker, LAYOUT_REFLOW_MS);
+        expect(transition.remainingMs()).toBe(0);
+
+        transition.setActive(true);
+        vi.advanceTimersByTime(100);
+        expect(transition.remainingMs()).toBe(LAYOUT_REFLOW_MS - 100);
+        vi.advanceTimersByTime(LAYOUT_REFLOW_MS);
+        expect(transition.remainingMs()).toBe(0);
+
+        transition.setActive(true);
+        transition.setActive(false);
+        expect(transition.remainingMs()).toBe(0);
     });
 });

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/sheet";
 import {
     applyTheme,
+    isThemeMode,
     readThemeMode,
     THEME_MODES,
     type ThemeMode,
@@ -76,6 +77,11 @@ function notifyThemeChange(): void {
 function getServerThemeMode(): ThemeMode {
     return "system";
 }
+function chooseThemeMode(next: string): void {
+    if (!isThemeMode(next)) return;
+    applyTheme(next);
+    notifyThemeChange();
+}
 
 function ThemeMenu() {
     const mode = useSyncExternalStore(
@@ -83,11 +89,6 @@ function ThemeMenu() {
         readThemeMode,
         getServerThemeMode,
     );
-    const choose = (next: string) => {
-        if (!(THEME_MODES as readonly string[]).includes(next)) return;
-        applyTheme(next as ThemeMode);
-        notifyThemeChange();
-    };
 
     // Controlled so it can be force-closed below. Its popup portals into
     // <body>, same as the Sheet's, and the view-transition swap replaces
@@ -114,7 +115,10 @@ function ThemeMenu() {
                 <ModeIcon mode={mode} className="size-5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-                <DropdownMenuRadioGroup value={mode} onValueChange={choose}>
+                <DropdownMenuRadioGroup
+                    value={mode}
+                    onValueChange={chooseThemeMode}
+                >
                     {THEME_MODES.map((option) => (
                         // Base UI's Menu.RadioItem defaults closeOnClick to
                         // false; a theme choice is a completed action, so

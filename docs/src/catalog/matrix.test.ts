@@ -54,6 +54,8 @@ const manifest: SiteManifest = {
     ],
 };
 
+const withOpen = (id: string) => ({ ...defaultState(manifest), open: id });
+
 describe("defaultState", () => {
     it("uses the first two axes as rows and columns and the first value of every other axis", () => {
         expect(defaultState(manifest)).toEqual({
@@ -279,7 +281,7 @@ describe("buildMatrix", () => {
             "head-unit",
         ]);
         expect(
-            matrix.rows[1]!.cells.map((cell) => cell.entry?.id ?? null),
+            matrix.rows[1].cells.map((cell) => cell.entry?.id ?? null),
         ).toEqual([
             "head-unit__small__light",
             "head-unit__medium__light",
@@ -293,7 +295,7 @@ describe("buildMatrix", () => {
             fixed: { theme: "dark" },
         });
         expect(
-            matrix.rows[0]!.cells.map((cell) => cell.entry?.id ?? null),
+            matrix.rows[0].cells.map((cell) => cell.entry?.id ?? null),
         ).toEqual(["floor__small__dark", null, null]);
     });
 });
@@ -310,32 +312,34 @@ describe("entryIdFor", () => {
 });
 
 describe("neighbourId", () => {
-    const open = (id: string) => ({ ...defaultState(manifest), open: id });
-
     it("moves along the row and column in all four directions", () => {
         expect(
-            neighbourId(open("floor__small__light"), manifest, "right"),
+            neighbourId(withOpen("floor__small__light"), manifest, "right"),
         ).toBe("floor__medium__light");
-        expect(neighbourId(open("floor__small__light"), manifest, "down")).toBe(
-            "head-unit__small__light",
-        );
         expect(
-            neighbourId(open("floor__medium__light"), manifest, "left"),
+            neighbourId(withOpen("floor__small__light"), manifest, "down"),
+        ).toBe("head-unit__small__light");
+        expect(
+            neighbourId(withOpen("floor__medium__light"), manifest, "left"),
         ).toBe("floor__small__light");
         expect(
-            neighbourId(open("head-unit__small__light"), manifest, "up"),
+            neighbourId(withOpen("head-unit__small__light"), manifest, "up"),
         ).toBe("floor__small__light");
     });
 
     it("skips empty cells and stops at the edges", () => {
         expect(
-            neighbourId(open("head-unit__medium__light"), manifest, "right"),
+            neighbourId(
+                withOpen("head-unit__medium__light"),
+                manifest,
+                "right",
+            ),
         ).toBeNull();
         expect(
-            neighbourId(open("floor__large__light"), manifest, "down"),
+            neighbourId(withOpen("floor__large__light"), manifest, "down"),
         ).toBeNull();
         expect(
-            neighbourId(open("floor__small__light"), manifest, "left"),
+            neighbourId(withOpen("floor__small__light"), manifest, "left"),
         ).toBeNull();
     });
 

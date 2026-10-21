@@ -143,6 +143,21 @@
     <string name="music_repeat">Repeat</string>
     <string name="music_playing_next">Playing next</string>
 
+    <!-- Video window (issue #390). The hidden-picture line must never suggest
+         that the gate makes watching legal or safe; it says only what the
+         window does. -->
+    <string name="video_title">Video</string>
+    <string name="video_pick">Pick a video</string>
+    <string name="video_pick_another">Pick another video</string>
+    <string name="video_picture_hidden_playing">Picture hidden while driving · Audio keeps playing</string>
+    <string name="video_picture_hidden_paused">Picture hidden while driving</string>
+    <string name="video_play">Play</string>
+    <string name="video_pause">Pause</string>
+    <string name="video_expand">Open the video player</string>
+    <string name="video_close">Close the video window</string>
+    <string name="video_file_unavailable">The picked file can\'t be opened. Pick it again.</string>
+    <string name="video_pick_failed">The app couldn\'t keep access to that file. Pick another.</string>
+
     <!-- Dashboard footer: navigation -->
     <string name="nav_phone">Phone</string>
     <string name="nav_apps">Apps</string>
@@ -151,6 +166,20 @@
     <string name="nav_browser">Browser</string>
     <string name="nav_assistant">Assistant</string>
     <string name="nav_settings">Settings</string>
+
+    <!-- Destination panel (the dock's Navigation button) -->
+    <string name="destination_title">Destination</string>
+    <string name="destination_open_maps">Open maps app</string>
+    <string name="destination_query_hint">Search for a place or address</string>
+    <string name="destination_navigate">Navigate</string>
+    <string name="destination_save_query">Save</string>
+    <string name="destination_save_location">Save current location</string>
+    <!-- Shown under the disabled text field while the vehicle moves. -->
+    <string name="destination_moving_hint">Typing works when stopped. Voice and saved places work now.</string>
+    <string name="destination_saved_places">Saved places</string>
+    <string name="destination_no_saved_places">No saved places yet. Save a search or your current location while stopped.</string>
+    <!-- %1$s = the saved place's label -->
+    <string name="destination_delete_place">Delete %1$s</string>
 
     <!-- Shared edit-mode "Done" affordance (drawer pinned dock + dashboard dock nav). -->
     <string name="edit_done">Done</string>
@@ -301,7 +330,7 @@
     <string name="font_picker_search_hint">Search Google Fonts</string>
     <string name="font_picker_clear">Clear search</string>
     <string name="font_picker_system">System default</string>
-    <string name="font_picker_system_desc">Use the head unit\'s built-in font</string>
+    <string name="font_picker_system_desc">Use the device\'s built-in font</string>
     <string name="font_picker_subtitle_cjk">%1$s · CJK</string>
     <string name="font_picker_selected">Selected</string>
     <string name="font_picker_loading">Loading Google Fonts…</string>
@@ -394,7 +423,7 @@
     <string name="settings_google_maps_rendering_auto">Automatic</string>
     <string name="settings_google_maps_rendering_raster">Raster</string>
     <string name="settings_google_maps_rendering_vector">Vector</string>
-    <string name="settings_google_maps_rendering_note">Vector adds heading-up rotation and tilt; raster is flat and north-up. Automatic follows the map ID\'s cloud configuration, and renders raster when no map ID is set. Vector needs no map ID, but a device that cannot render it falls back to raster on its own.</string>
+    <string name="settings_google_maps_rendering_note">Vector adds heading-up rotation and tilt; raster is flat and north-up. Automatic follows the map ID\'s cloud configuration, and renders raster when no map ID is set. Vector needs no map ID, but on a device without WebGL it shows a notice instead of a map; choose Raster or Automatic there.</string>
     <string name="settings_google_maps_type">Map type</string>
     <string name="settings_google_maps_type_roadmap">Roadmap</string>
     <string name="settings_google_maps_type_satellite">Satellite</string>
@@ -447,6 +476,15 @@
     <string name="settings_panel_music_album_desc">Show the album name on the music card and the full-screen player.</string>
     <string name="settings_group_panel_music_art">Cover art</string>
     <string name="settings_panel_music_art_desc">Show the album artwork on the music card and the full-screen player.</string>
+    <string name="settings_group_panel_video">Video window</string>
+    <string name="settings_panel_video_desc">Play a video file from this device in a small window over the map.</string>
+    <string name="settings_video_file">Video file</string>
+    <string name="settings_video_file_none">No file picked</string>
+    <string name="settings_video_hide_picture">Hide the picture while driving</string>
+    <string name="settings_video_hide_picture_desc">The picture shows only a few seconds after GPS reads the vehicle as stopped. Audio keeps playing.</string>
+    <string name="settings_video_show_picture_confirm_title">Show the picture while driving?</string>
+    <string name="settings_video_show_picture_confirm_message">Many places ban video the driver can see while driving, including when stopped at lights or in traffic. Some also require the engine to be off. This app can\'t tell whether your vehicle is parked. Turn this off only if the screen is out of the driver\'s view or local law allows it, and follow the law where you drive.</string>
+    <string name="settings_video_show_picture_confirm">Turn off</string>
     <string name="settings_visible_calendars">Visible calendars</string>
     <string name="settings_visible_calendars_all">All calendars</string>
     <string name="settings_visible_calendars_count">%1$d of %2$d shown</string>
@@ -469,6 +507,8 @@
     <string name="settings_updates_available">Available version</string>
     <!-- %1$s = the offered version name, %2$s = its download size, e.g. "45.3 MB" -->
     <string name="settings_updates_available_summary">%1$s · %2$s</string>
+    <!-- The same, for the build the user skipped (Skip this version) -->
+    <string name="settings_updates_available_summary_skipped">%1$s · %2$s · Skipped</string>
     <string name="settings_updates_up_to_date">Up to date</string>
     <string name="settings_updates_check">Check for updates</string>
     <string name="settings_updates_status_disabled">This build does not check for updates.</string>
@@ -482,6 +522,8 @@
     <string name="settings_updates_failed_verify">The download did not match the published update and was deleted.</string>
     <string name="settings_updates_failed_install_conflict">This update is signed with a different key, so it cannot replace the installed app.</string>
     <string name="settings_updates_failed_install_blocked">This device blocks app installs, so the update cannot be installed here.</string>
+    <string name="settings_updates_failed_developer_verification_offline">Android needs a connection to verify this app\'s developer, so the update was not installed. Try again when you are online.</string>
+    <string name="settings_updates_failed_developer_verification_blocked">Android\'s developer verification blocked this update, so it was not installed.</string>
     <string name="settings_updates_failed_other">The update could not be completed.</string>
     <!-- The one-tap update row, through every stage; %1$s = the offered version name -->
     <string name="settings_updates_update">Update to %1$s</string>
@@ -505,6 +547,11 @@
     <string name="settings_updates_retry">Retry</string>
     <!-- %1$s = the offered version name, %2$s = its download size, e.g. "45.3 MB" -->
     <string name="settings_updates_retry_desc">Version %1$s · %2$s</string>
+    <string name="settings_updates_discard">Discard download</string>
+    <string name="settings_updates_discard_desc">Deletes the downloaded file. The update stays on offer.</string>
+    <string name="settings_updates_skip">Skip this version</string>
+    <!-- %1$s = the offered version name -->
+    <string name="settings_updates_skip_desc">No more reminders about %1$s. A newer version is offered again.</string>
     <string name="settings_updates_auto_check">Check automatically</string>
     <string name="settings_updates_auto_check_desc">Look for a new version once a day. Nothing downloads until you ask.</string>
     <string name="settings_updates_release_page">Open release page</string>

@@ -34,7 +34,7 @@ import {
     type Direction,
     type ViewState,
 } from "./matrix";
-import { CATALOG_SCHEMA_VERSION } from "./schema.ts";
+import { isSiteManifest } from "./schema.ts";
 
 export interface Channel {
     /** Stable identifier; also the `?channel=` URL value for a non-default channel. */
@@ -85,7 +85,8 @@ type FetchOutcome =
 // effect) to know whether to honour it or fall back to the default. The
 // default channel is never "pending" — it needs no probe.
 type Resolution =
-    { kind: "resolved"; id: string } | { kind: "pending"; requestedId: string };
+    | { kind: "resolved"; id: string }
+    | { kind: "pending"; requestedId: string };
 
 const probe = async (manifestUrl: string): Promise<boolean> => {
     try {
@@ -478,7 +479,7 @@ function Lightbox({
                             </a>
                         </figcaption>
                         <DialogDescription className="sr-only">
-                            Use the arrow keys to move to a neighbouring render.
+                            Use the arrow keys to move to a neighboring render.
                         </DialogDescription>
                     </figure>
                 )}
@@ -578,7 +579,9 @@ export default function CatalogViewer({ channels }: Props) {
     // stale deep link does not keep pointing at content that no longer shows).
     useEffect(() => {
         let cancelled = false;
-        Promise.all(
+        // Fire-and-forget: probe() never rejects, and the result is applied
+        // only while the effect is still mounted.
+        void Promise.all(
             channels
                 .slice(1)
                 .map(
@@ -610,13 +613,17 @@ export default function CatalogViewer({ channels }: Props) {
     // Fetches the resolved channel's manifest: on first resolution, and again
     // on every explicit switch (channelId changing is what drives a refetch).
     useEffect(() => {
-        if (channelId === null) return; // still waiting on the probe above
+        // Explicit `return undefined` (not a bare `return`): the fetching path
+        // returns a cleanup, so every exit states what it returns.
+        if (channelId === null) return undefined; // still waiting on the probe above
         const channel = channels.find(
             (candidate) => candidate.id === channelId,
         );
-        if (channel === undefined) return; // defensive; channelId always names a real channel
+        if (channel === undefined) return undefined; // defensive; channelId always names a real channel
         let cancelled = false;
-        fetch(channel.manifestUrl)
+        // Fire-and-forget: every failure is caught below and reported through
+        // `status`, and `cancelled` drops a result that lands after cleanup.
+        void fetch(channel.manifestUrl)
             .then(async (response): Promise<FetchOutcome> => {
                 if (response.status === 404) return { kind: "missing" };
                 if (!response.ok)
@@ -624,8 +631,9 @@ export default function CatalogViewer({ channels }: Props) {
                         kind: "error",
                         message: `HTTP ${response.status}`,
                     };
-                const manifest = (await response.json()) as SiteManifest;
-                if (manifest.schemaVersion !== CATALOG_SCHEMA_VERSION)
+                const manifest: unknown = await response.json();
+                // Rejects a version mismatch and a malformed body alike.
+                if (!isSiteManifest(manifest))
                     return {
                         kind: "error",
                         message:
@@ -737,8 +745,8 @@ export default function CatalogViewer({ channels }: Props) {
     if (status.kind === "missing")
         return (
             <output className="block text-muted-foreground">
-                This build carries no catalog. The published site renders it on
-                every push to main.
+                This build carries no catalog. The published site renders the
+                catalog on every push to main.
             </output>
         );
     if (status.kind === "error")

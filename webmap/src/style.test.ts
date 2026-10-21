@@ -4,7 +4,6 @@ import {
     BUILDING_EXTRUSION_OPACITY,
     clampMarkerPos,
     DEFAULT_TERRAIN_TILEJSON_URL,
-    googleMarkerSpot,
     injectFeatures,
     MAX_MARKER_DROP,
     markerDrop,
@@ -32,7 +31,7 @@ function roadLine(id: string): LayerSpecification {
         type: "line",
         source: "openmaptiles",
         "source-layer": "transportation",
-    } as LayerSpecification;
+    };
 }
 
 function baseStyle(): StyleSpecification {
@@ -90,17 +89,16 @@ function baseStyle(): StyleSpecification {
                 paint: { "text-halo-width": 1.4 },
             },
         ],
-    } as StyleSpecification;
+    };
 }
 
-// Paint map of one layer by id; module-scoped so it is not re-created per
-// test (unicorn/consistent-function-scoping).
-function paintOf(style: StyleSpecification, id: string) {
-    return (
-        style.layers.find((l) => l.id === id) as {
-            paint?: Record<string, unknown>;
-        }
-    ).paint;
+// Paint map of one layer by id, read as a plain record (the style spec types
+// paint per layer type); module-scoped so it is not re-created per test
+// (unicorn/consistent-function-scoping).
+function paintOf(style: StyleSpecification, id: string): Record<string, unknown> | undefined {
+    const layer = style.layers.find((l) => l.id === id);
+    if (layer === undefined) throw new Error(`the style has no layer ${id}`);
+    return layer.paint;
 }
 
 describe("vectorSourceId", () => {
@@ -133,11 +131,7 @@ describe("injectFeatures: 3D buildings", () => {
 
     it("paints the extrusion with the pushed theme colour, semi-transparent", () => {
         const style = injectFeatures(baseStyle(), BUILDINGS);
-        const paint = (
-            style.layers.find((l) => l.id === "femto-3d-buildings") as {
-                paint?: Record<string, unknown>;
-            }
-        ).paint;
+        const paint = paintOf(style, "femto-3d-buildings");
         expect(paint?.["fill-extrusion-color"]).toBe(BUILDINGS.buildingColor);
         expect(paint?.["fill-extrusion-opacity"]).toBe(BUILDING_EXTRUSION_OPACITY);
     });
@@ -297,10 +291,7 @@ describe("injectFeatures: accent recolour", () => {
 
     it("applies no recolour for a plain (non-accent) style", () => {
         const style = injectFeatures(baseStyle(), OFF);
-        const bg = style.layers.find((l) => l.id === "bg") as {
-            paint?: Record<string, unknown>;
-        };
-        expect(bg.paint).toBeUndefined();
+        expect(paintOf(style, "bg")).toBeUndefined();
         expect(paintOf(style, "building")?.["fill-color"]).toBeUndefined();
     });
 });
@@ -325,15 +316,17 @@ describe("roadClassOrNull", () => {
             roadClassOrNull({
                 id: "highway_minor",
                 type: "fill",
+                source: "openmaptiles",
                 "source-layer": "transportation",
-            } as LayerSpecification),
+            }),
         ).toBeNull();
         expect(
             roadClassOrNull({
                 id: "highway_minor",
                 type: "line",
+                source: "openmaptiles",
                 "source-layer": "aeroway",
-            } as LayerSpecification),
+            }),
         ).toBeNull();
     });
 });
@@ -432,49 +425,6 @@ describe("markerSpot", () => {
         expect(markerSpot({ ...layout, rightSafe: 0, leftSafe: 0.428 }).x).toBe(
             markerXFraction(0.428),
         );
-    });
-});
-
-describe("googleMarkerSpot", () => {
-    // A head-unit-sized page: 853 px wide, right-hand cards reserving 42.8%
-    // of it, and a ripple 32 px in radius.
-    const layout = { markerPos: 70, bottomSafe: 0.1, rightSafe: 0.428, leftSafe: 0 };
-    const tilted = { vector: true, tiltDeg: 55, widthPx: 853, reachPx: 32 };
-
-    it("centres the marker on a tilted vector map, over the perspective's vanishing point", () => {
-        // The road ahead then runs straight up through the chevron instead of
-        // leaning toward the centre, where Google's perspective converges.
-        expect(googleMarkerSpot(layout, tilted)).toEqual({ x: 0, y: markerDrop(70, 0.1) });
-    });
-
-    it("keeps the OSM placement on a raster map and on a vector map at tilt 0", () => {
-        expect(googleMarkerSpot(layout, { ...tilted, vector: false })).toEqual(markerSpot(layout));
-        expect(googleMarkerSpot(layout, { ...tilted, tiltDeg: 0 })).toEqual(markerSpot(layout));
-    });
-
-    it("clamps the marker so its ripple stays clear of the cards", () => {
-        // 600 px with the cards over 45%: the exposed strip ends 30 px right
-        // of centre, 2 px short of the ripple's reach.
-        const narrow = { ...tilted, widthPx: 600 };
-        expect(googleMarkerSpot({ ...layout, rightSafe: 0.45 }, narrow).x * 600).toBeCloseTo(-2, 9);
-        expect(
-            googleMarkerSpot({ ...layout, rightSafe: 0, leftSafe: 0.45 }, narrow).x * 600,
-        ).toBeCloseTo(2, 9);
-    });
-
-    it("centres the marker in the strip when the strip is narrower than the ripple", () => {
-        // 100 px with the cards over 45%: the 55 px strip cannot hold a 64 px
-        // ripple, so the marker takes the strip's middle, 22.5 px left of centre.
-        const spot = googleMarkerSpot({ ...layout, rightSafe: 0.45 }, { ...tilted, widthPx: 100 });
-        expect(spot.x * 100).toBeCloseTo(-22.5, 9);
-    });
-
-    it("keeps the marker's drop in every placement", () => {
-        const drop = markerDrop(layout.markerPos, layout.bottomSafe);
-        expect(
-            googleMarkerSpot({ ...layout, rightSafe: 0.45 }, { ...tilted, widthPx: 600 }).y,
-        ).toBe(drop);
-        expect(googleMarkerSpot(layout, { ...tilted, vector: false }).y).toBe(drop);
     });
 });
 

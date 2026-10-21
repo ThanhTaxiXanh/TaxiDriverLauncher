@@ -21,14 +21,14 @@ plugins {
 node {
     download = true
     // renovate: datasource=node-version depName=node
-    version = "24.21.0"
+    version = "24.22.0"
     // null suppresses the plugin's own repository registration; the Node.js
     // ivy repository lives in settings.gradle.kts (FAIL_ON_PROJECT_REPOS).
     distBaseUrl = null
     // Mirrors webmap/package.json "packageManager" (the pin pnpm itself reads
     // when invoked directly); this copy provisions the Gradle-managed install.
     // renovate: datasource=npm depName=pnpm
-    pnpmVersion = "12.6.0"
+    pnpmVersion = "12.14.0"
     nodeProjectDir = file("../webmap")
 }
 
@@ -324,6 +324,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.webkit)
+    implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
     implementation(libs.kotlinx.serialization.json)
     implementation(platform(libs.okhttp.bom))
@@ -334,6 +335,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.material.kolor)
     implementation(libs.haze)
+    implementation(libs.haze.blur)
     implementation(libs.composables.icons.lucide)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

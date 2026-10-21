@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import SiteHeader from "./SiteHeader";
 
 const props = {
@@ -39,8 +39,8 @@ describe("SiteHeader", () => {
         await user.click(screen.getByRole("button", { name: "Open menu" }));
         const dialog = await screen.findByRole("dialog", { name: "Menu" });
         const link = dialog.querySelector('a[href="/b/catalog/"]');
-        expect(link).not.toBeNull();
-        await user.click(link as HTMLElement);
+        assert.isNotNull(link);
+        await user.click(link);
         await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     });
 

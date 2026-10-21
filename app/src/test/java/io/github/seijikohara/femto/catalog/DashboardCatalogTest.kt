@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import com.github.takahirom.roborazzi.captureRoboImage
 import io.github.seijikohara.femto.testfixtures.DashboardFixtures
 import io.github.seijikohara.femto.testfixtures.MapBackdrop
+import io.github.seijikohara.femto.testfixtures.RobolectricHaze
 import io.github.seijikohara.femto.ui.home.components.DashboardScaffold
 import io.github.seijikohara.femto.ui.home.components.GlassConfig
 import io.github.seijikohara.femto.ui.home.components.MapConfig
@@ -53,23 +54,25 @@ internal class DashboardCatalogTest(
         // instance, so no stale window carries over.
         RuntimeEnvironment.setQualifiers(entry.geometry.qualifiers)
         captureRoboImage(filePath = "${CatalogRun.OUTPUT_DIR}/${entry.file}") {
-            FemtoTheme(uiScale = entry.scale, darkTheme = entry.darkTheme) {
-                DashboardScaffold(
-                    uiState = DashboardFixtures.state,
-                    is24Hour = true,
-                    showClockSeconds = true,
-                    speedUnit = SpeedUnit.KILOMETERS_PER_HOUR,
-                    temperatureUnit = TemperatureUnit.CELSIUS,
-                    mapConfig = MapConfig(),
-                    panels = PanelVisibility(),
-                    glassConfig = GlassConfig(),
-                    onAction = {},
-                    modifier = Modifier.fillMaxSize(),
-                    dockPosition = entry.dockPosition,
-                    driverSide = entry.driverSide,
-                    clock = DashboardFixtures.fixedClock,
-                    mapSurface = { _, config -> MapBackdrop(darkTheme = entry.darkTheme, mapConfig = config) },
-                )
+            RobolectricHaze {
+                FemtoTheme(uiScale = entry.scale, darkTheme = entry.darkTheme) {
+                    DashboardScaffold(
+                        uiState = DashboardFixtures.state,
+                        is24Hour = true,
+                        showClockSeconds = true,
+                        speedUnit = SpeedUnit.KILOMETERS_PER_HOUR,
+                        temperatureUnit = TemperatureUnit.CELSIUS,
+                        mapConfig = MapConfig(),
+                        panels = PanelVisibility(),
+                        glassConfig = GlassConfig(),
+                        onAction = {},
+                        modifier = Modifier.fillMaxSize(),
+                        dockPosition = entry.dockPosition,
+                        driverSide = entry.driverSide,
+                        clock = DashboardFixtures.fixedClock,
+                        mapSurface = { _, config -> MapBackdrop(darkTheme = entry.darkTheme, mapConfig = config) },
+                    )
+                }
             }
         }
     }

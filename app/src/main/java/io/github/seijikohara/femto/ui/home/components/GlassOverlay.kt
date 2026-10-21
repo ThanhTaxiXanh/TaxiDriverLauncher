@@ -10,9 +10,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.HazeColorEffect
+import dev.chrisbanes.haze.blur.hazeBlur
 import io.github.seijikohara.femto.data.display.DEFAULT_GLASS_BLUR_DP
 import io.github.seijikohara.femto.data.display.DEFAULT_GLASS_SHADOW_ENABLED
 import io.github.seijikohara.femto.data.display.DEFAULT_GLASS_SHADOW_INTENSITY
@@ -44,7 +47,13 @@ internal data class GlassConfig(
  * Shared frosted-glass backdrop for the map overlays (clock / speed): blur the
  * map captured via [hazeState] and lay the surface tint over it. [tintScale] is
  * the absolute tint opacity percent (0 = clear, 100 = opaque); the overlays stop
- * repeating the `hazeEffect` lambda.
+ * repeating the Haze blur style.
+ *
+ * Two arguments keep the Haze 1 rendering: [HazeInput.Sources] samples only the
+ * registered map source (the [HazeInput.Backdrop] input can switch to native
+ * window pixels behind an experimental Haze flag), and
+ * [HazePerformanceMode.Quality] keeps the full-resolution blur input that the
+ * Haze 2 default (Balanced) downsamples.
  */
 @Composable
 internal fun Modifier.glassEffect(
@@ -53,14 +62,17 @@ internal fun Modifier.glassEffect(
     tintScale: Int,
 ): Modifier {
     val tintAlpha = glassTintAlpha(tintScale)
-    // Capture the surface color outside the draw-time hazeEffect block, which
-    // cannot read MaterialTheme.
     val surfaceColor = MaterialTheme.colorScheme.surface
-    return hazeEffect(state = hazeState) {
-        backgroundColor = surfaceColor
-        tints = listOf(HazeTint(surfaceColor.copy(alpha = tintAlpha)))
-        this.blurRadius = blurRadius
-    }
+    return hazeBlur(
+        input = HazeInput.Sources(hazeState),
+        style =
+            HazeBlurStyle {
+                backgroundColor(surfaceColor)
+                colorEffects(listOf(HazeColorEffect.tint(surfaceColor.copy(alpha = tintAlpha))))
+                blurRadius(blurRadius)
+            },
+        performanceMode = HazePerformanceMode.Quality,
+    )
 }
 
 // Hairline width for the optional glass outline.
