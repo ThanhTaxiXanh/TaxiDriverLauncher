@@ -36,5 +36,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Femto Car Launcher"
+rootProject.name = "TaxiDriverLauncher"
 include(":app")
