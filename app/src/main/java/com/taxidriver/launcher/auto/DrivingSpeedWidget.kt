@@ -51,7 +51,7 @@ internal class DrivingSpeedWidget(
             canvas.drawText(speed?.toString() ?: "—", 120f, 83f, paint)
 
             paint.color = if (night) Color.rgb(177, 203, 227) else Color.rgb(75, 91, 113)
-            paint.typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.MEDIUM)
+            paint.typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
             paint.textSize = 26f
             canvas.drawText("km/h", 120f, 117f, paint)
             return bitmap
