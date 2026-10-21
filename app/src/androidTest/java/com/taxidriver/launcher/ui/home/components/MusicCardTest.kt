@@ -1,0 +1,280 @@
+package com.taxidriver.launcher.ui.home.components
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import com.taxidriver.launcher.data.music.MusicCardState
+import com.taxidriver.launcher.data.music.MusicCommand
+import com.taxidriver.launcher.data.music.SPECTRUM_BAND_COUNT
+import com.taxidriver.launcher.testfixtures.fakeNowPlaying
+import com.taxidriver.launcher.ui.theme.FemtoTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.Rule
+import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class MusicCardTest {
+    @get:Rule
+    val rule = createComposeRule()
+
+    @Test
+    fun renders_track_artist_and_transport_when_playing() {
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying()),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        rule.onNodeWithText("Headlights").assertIsDisplayed()
+        rule.onNodeWithText("The Static Drive", substring = true).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Play / pause").assertIsDisplayed()
+    }
+
+    @Test
+    fun renders_album_when_present() {
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying(album = "Late Shift")),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        rule.onNodeWithText("Late Shift").assertIsDisplayed()
+    }
+
+    @Test
+    fun keeps_paused_session_on_screen_instead_of_collapsing_to_empty() {
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying(isPlaying = false)),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        rule.onNodeWithText("Headlights").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Play / pause").assertIsDisplayed()
+    }
+
+    @Test
+    fun tapping_the_card_dispatches_launch_with_the_source_package() {
+        var launched: String? = null
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying()),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = { launched = it },
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        // The whole card (outside the transport controls) opens the source app.
+        // Tapping the title — a non-interactive child — reaches the card's clickable.
+        rule.onNodeWithText("Headlights").performClick()
+        assertEquals("com.example.music", launched)
+    }
+
+    @Test
+    fun tapping_a_transport_control_does_not_launch_the_source() {
+        var launched: String? = null
+        var command: MusicCommand? = null
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying()),
+                    onCommand = { command = it },
+                    onConnect = {},
+                    onLaunchSource = { launched = it },
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        // The transport button consumes its tap, so the card-wide launch must not fire.
+        rule.onNodeWithContentDescription("Play / pause").performClick()
+        assertEquals(MusicCommand.PlayPause, command)
+        assertEquals(null, launched)
+    }
+
+    @Test
+    fun spectrum_background_does_not_intercept_transport_taps() {
+        var command: MusicCommand? = null
+        // A non-null spectrum drives SpectrumBackground's continuous
+        // withFrameNanos loop, which keeps the Compose frame clock perpetually
+        // busy and times out Espresso's idle wait at setContent. Pausing the
+        // clock parks the loop on its next-frame suspension, so waitForIdle no
+        // longer sees pending frame work; the static transport layout still
+        // composes and lays out, which is all this tap test needs.
+        rule.mainClock.autoAdvance = false
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying()),
+                    onCommand = { command = it },
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                    spectrum = MutableStateFlow(FloatArray(SPECTRUM_BAND_COUNT) { 0.6f }),
+                )
+            }
+        }
+        // The spectrum canvas overlays the transport strip's bounds; the
+        // buttons draw above it and must keep receiving their taps.
+        rule.onNodeWithContentDescription("Play / pause").assertIsDisplayed().performClick()
+        assertEquals(MusicCommand.PlayPause, command)
+    }
+
+    @Test
+    fun renders_connect_cta_and_dispatches_when_permission_missing() {
+        var tapped = false
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.NeedsPermission,
+                    onCommand = {},
+                    onConnect = { tapped = true },
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        rule.onNodeWithText("Tap to connect a player").assertIsDisplayed().performClick()
+        assertTrue(tapped)
+    }
+
+    @Test
+    fun renders_nothing_playing_placeholder_when_no_active_session() {
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.NoActiveSession,
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        rule.onNodeWithText("Nothing is playing").assertIsDisplayed()
+    }
+
+    @Test
+    fun tapping_the_empty_state_invokes_onPlay() {
+        var played = false
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.NoActiveSession,
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = { played = true },
+                )
+            }
+        }
+        rule.onNodeWithText("Nothing is playing").performClick()
+        assertTrue(played)
+    }
+
+    @Test
+    fun album_art_tap_invokes_onExpand() {
+        var expanded = false
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying()),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = { expanded = true },
+                    onPlay = {},
+                )
+            }
+        }
+        rule.onNodeWithContentDescription("Open full-screen player").performClick()
+        assertTrue(expanded)
+    }
+
+    @Test
+    fun hides_album_when_musicShowAlbum_false() {
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying(album = "Late Shift")),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                    showAlbum = false,
+                )
+            }
+        }
+        rule.onNodeWithText("Late Shift").assertDoesNotExist()
+    }
+
+    @Test
+    fun source_eyebrow_tap_invokes_onExpand() {
+        var expanded = false
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying()),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = { expanded = true },
+                    onPlay = {},
+                    showArt = false,
+                )
+            }
+        }
+        rule.onNodeWithContentDescription("Open the full-screen player").performClick()
+        assertTrue(expanded)
+    }
+
+    @Test
+    fun eyebrow_expand_is_distinct_from_art_expand() {
+        rule.setContent {
+            FemtoTheme {
+                MusicCard(
+                    state = MusicCardState.Playing(fakeNowPlaying()),
+                    onCommand = {},
+                    onConnect = {},
+                    onLaunchSource = {},
+                    onExpand = {},
+                    onPlay = {},
+                )
+            }
+        }
+        // Both affordances coexist when art is shown; distinct labels keep each
+        // addressable and keep album_art_tap_invokes_onExpand unambiguous.
+        rule.onNodeWithContentDescription("Open full-screen player").assertExists()
+        rule.onNodeWithContentDescription("Open the full-screen player").assertExists()
+    }
+}

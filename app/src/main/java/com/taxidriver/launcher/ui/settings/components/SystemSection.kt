@@ -1,0 +1,50 @@
+package com.taxidriver.launcher.ui.settings.components
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.taxidriver.launcher.R
+import com.taxidriver.launcher.ui.settings.SettingsAction
+import com.taxidriver.launcher.ui.settings.SettingsDocument
+
+// The System category's rows: action links plus the global reset. Unlike the
+// other categories, System has no SettingsSectionId of its own (see
+// SettingsCategoryId), so the shared master-detail wrapper never gives it a
+// per-category reset icon — ResetRow below is its only reset affordance.
+@Composable
+internal fun SystemSection(
+    onAction: (SettingsAction) -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+    onOpenSystemSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+    onOpenLicenses: () -> Unit,
+    onOpenDocument: (SettingsDocument) -> Unit,
+    modifier: Modifier = Modifier,
+) = Column(modifier = modifier) {
+    ActionRow(
+        title = stringResource(R.string.settings_open_notification_access),
+        onClick = onOpenNotificationAccess,
+    )
+    ActionRow(
+        title = stringResource(R.string.settings_open_system_settings),
+        onClick = onOpenSystemSettings,
+    )
+    ActionRow(
+        title = stringResource(R.string.settings_open_diagnostics),
+        onClick = onOpenDiagnostics,
+    )
+    ActionRow(
+        title = stringResource(R.string.settings_open_licenses),
+        onClick = onOpenLicenses,
+    )
+    ActionRow(
+        title = stringResource(R.string.settings_open_privacy),
+        onClick = { onOpenDocument(SettingsDocument.PRIVACY_POLICY) },
+    )
+    ActionRow(
+        title = stringResource(R.string.settings_open_terms),
+        onClick = { onOpenDocument(SettingsDocument.TERMS) },
+    )
+    ResetRow(onConfirm = { onAction(SettingsAction.ResetToDefaults) })
+}

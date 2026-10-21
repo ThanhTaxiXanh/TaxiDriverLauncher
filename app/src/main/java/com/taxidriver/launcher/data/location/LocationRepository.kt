@@ -1,0 +1,200 @@
+@file:OptIn(ExperimentalCoroutinesApi::class)
+
+package com.taxidriver.launcher.data.location
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.location.Location
+import android.location.LocationManager
+import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
+import androidx.core.content.getSystemService
+import androidx.core.location.LocationListenerCompat
+import androidx.core.location.LocationManagerCompat
+import androidx.core.location.LocationRequestCompat
+import com.taxidriver.launcher.data.common.WhileUiSubscribed
+import com.taxidriver.launcher.data.system.SystemPermissionSignals
+import com.taxidriver.launcher.data.system.SystemStatus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.shareIn
+
+private const val TAG = "LocationRepository"
+
+internal class LocationRepository(
+    private val context: Context,
+    // User-tunable request parameters (see [LocationSettings]); a change while
+    // collectors are live tears down and re-registers the platform listener.
+    private val settings: Flow<LocationSettings>,
+    // Repository-scoped scope owns the single shared GPS subscription. The default keeps
+    // production wiring trivial; tests inject their own scope to drive shareIn deterministically.
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    // Boot clock the recency baseline is judged against, injected for the same reason as the
+    // scope: Robolectric's SystemClock starts at zero, so tests would otherwise be unable to
+    // place a fix's stamp on either side of "now".
+    private val nowElapsedRealtimeNanos: () -> Long = SystemClock::elapsedRealtimeNanos,
+) {
+    private val locationManager: LocationManager = checkNotNull(context.getSystemService())
+
+    // Cold per-collector flow: each terminal collection registers updates and seeds
+    // getLastKnownLocation. Never expose this directly; it is the upstream for the shared flow.
+    //
+    // Seeding intent: the cached last-known fix is forwarded on subscribe even when it is
+    // stale. A head unit may sit cold for hours, and the first live fix can lag the host's
+    // ~30 s boot delay; emitting the stale fix first lets the map/weather/address panels show
+    // the last position immediately rather than an empty screen, and the next live update
+    // overwrites it. A stale fix is strictly better than no fix for an at-a-glance dashboard.
+    //
+    // Both GPS_PROVIDER and NETWORK_PROVIDER are registered so the launcher honors the
+    // ACCESS_COARSE_LOCATION manifest contract: a coarse-only ("Approximate") grant makes
+    // GPS_PROVIDER throw SecurityException while NETWORK_PROVIDER still delivers fixes at
+    // degraded precision, and a device without network location still gets GPS. Each provider
+    // is guarded by its own runCatching so a SecurityException or a missing provider on one
+    // never disturbs the other. A per-provider failure is dropped (no null emission) so a
+    // working provider is never blanked by the other's absence — and so is an empty cache
+    // once ANYTHING seeded: getLastKnownLocation returns null for a provider that has never
+    // fixed, and forwarding that null would blank the fix the other provider just delivered
+    // (the "never emits null once seeded" contract [LocationFreshness] states). When NOTHING
+    // seeded, though, one null is emitted deliberately: it is the cold-start "no fix yet"
+    // signal. HomeViewModel combines nine sources and emits only once every one has spoken,
+    // so a location source that stays silent until the first live fix starves the whole
+    // dashboard into its Initial state — no cards, music stuck on the connect CTA, map
+    // unavailable (reproduced on-device against 6cc0bf71).
+    @SuppressLint("MissingPermission") // Caller checks fine or coarse location before subscribing.
+    private fun rawLocationFlow(settings: LocationSettings): Flow<Location?> =
+        callbackFlow {
+            // One listener shared across both registrations; each fix is forwarded verbatim.
+            val listener = LocationListenerCompat { location -> trySend(location) }
+            var seeded = false
+
+            listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).forEach { provider ->
+                runCatching {
+                    locationManager.getLastKnownLocation(provider)
+                }.onSuccess { cached ->
+                    cached?.let {
+                        seeded = true
+                        trySend(it)
+                    }
+                }.onFailure { logProviderFailure("getLastKnownLocation", provider, it) }
+
+                runCatching {
+                    LocationManagerCompat.requestLocationUpdates(
+                        locationManager,
+                        provider,
+                        settings.toLocationRequest(),
+                        listener,
+                        Looper.getMainLooper(),
+                    )
+                }.onFailure { logProviderFailure("register", provider, it) }
+            }
+
+            if (!seeded) trySend(null)
+
+            awaitClose { locationManager.removeUpdates(listener) }
+        }.flowOn(Dispatchers.Main.immediate)
+
+    // Newest boot-clock timestamp forwarded to consumers. Repository-scoped rather than
+    // per-collection on purpose: the shared flow is torn down ~5 s after the last collector
+    // leaves and re-seeds getLastKnownLocation when it comes back, so a per-collection basis
+    // would wave that replayed cached fix straight through — the case issue #351 reports.
+    // Written and read only from the single upstream collector shareIn maintains; @Volatile
+    // covers the hand-off when a restart resumes on another thread.
+    @Volatile
+    private var lastAcceptedElapsedNanos: Long? = null
+
+    // Sanity gate for every consumer (speed numeral, map camera, geocoding, weather). It sits
+    // upstream of shareIn so the policy is applied once, not per collector. TripRepository
+    // keeps its own accrual filters; this only ever removes fixes those would have rejected
+    // too. See [isUsableFix] for the rules and for why accuracy is not one of them.
+    //
+    // Advancing the baseline is a narrower decision than forwarding the fix: it outlives every
+    // collector and only ratchets forward, so [canAnchorRecency] keeps a stamp the boot clock
+    // cannot vouch for from pinning it out of reach for the life of the process.
+    private fun Flow<Location?>.dropUnusableFixes(): Flow<Location?> =
+        filter { fix ->
+            // The null no-fix signal is not a fix; it passes untested and never
+            // touches the recency baseline.
+            if (fix == null) return@filter true
+            val usable = isUsableFix(fix, lastAcceptedElapsedNanos)
+            if (usable && canAnchorRecency(fix, nowElapsedRealtimeNanos())) {
+                lastAcceptedElapsedNanos = fix.elapsedRealtimeNanos
+            }
+            usable
+        }
+
+    // Single hot fan-out of the cold raw flow. On an always-on head unit the consumers
+    // (ViewModel combine, ReverseGeocoder, Weather, Trip, SystemStatus) collect the same
+    // instance, so they share one platform GPS registration + one getLastKnownLocation
+    // instead of one each. [WhileUiSubscribed] gates that single registration: it starts
+    // on the first collector, and stops ~5s after the last collector leaves (the grace
+    // window avoids tearing down and re-registering GPS across brief recomposition /
+    // config-change gaps). replay = 1 hands a late subscriber the most recent fix
+    // immediately rather than waiting for the next update.
+    //
+    // flatMapLatest re-runs the raw flow when the user changes a location setting: the
+    // cancelled inner flow's awaitClose removes the old listener, the new one re-registers
+    // with the new request and re-seeds getLastKnownLocation, and replay = 1 bridges
+    // subscribers across the swap so nobody observes a gap.
+    //
+    // combine adds [SystemPermissionSignals.refreshes] as a second trigger: a location
+    // grant landing while the launcher stays foreground fires it (MainActivity's
+    // permission-launcher callback feeds it), re-running rawLocationFlow so the
+    // per-provider registration that a denied-at-start SecurityException killed is
+    // retried. onStart(Unit) seeds the first registration; the pair is deliberately
+    // not distinctUntilChanged'd so a same-settings refresh still re-registers.
+    private val shared: SharedFlow<Location?> =
+        combine(
+            settings.distinctUntilChanged(),
+            SystemPermissionSignals.refreshes.onStart { emit(Unit) },
+        ) { locationSettings, _ -> locationSettings }
+            .flatMapLatest { rawLocationFlow(it) }
+            .dropUnusableFixes()
+            .shareIn(scope, WhileUiSubscribed, replay = 1)
+
+    // The repository factory already builds one LocationRepository and passes the single flow
+    // instance to all consumers, so returning the shared flow makes that sharing real.
+    fun locationFlow(): Flow<Location?> = shared
+
+    private fun logProviderFailure(
+        stage: String,
+        provider: String,
+        error: Throwable,
+    ) = when (error) {
+        // A coarse-only grant makes GPS_PROVIDER throw SecurityException by design.
+        is SecurityException -> Log.d(TAG, "$stage $provider denied", error)
+
+        else -> Log.w(TAG, "$stage $provider failed", error)
+    }
+}
+
+private fun LocationSettings.toLocationRequest(): LocationRequestCompat =
+    LocationRequestCompat
+        .Builder(intervalMillis)
+        .setQuality(quality.toCompatQuality())
+        // The head unit runs on vehicle power: never throttle below the requested
+        // interval — let the GNSS chip deliver fixes as fast as it emits them. The
+        // interval itself is the user-facing rate knob, so a separate min-interval
+        // setting would only duplicate it.
+        .setMinUpdateIntervalMillis(0L)
+        .setMinUpdateDistanceMeters(minUpdateDistanceMeters.toFloat())
+        .build()
+
+private fun LocationQualitySetting.toCompatQuality(): Int =
+    when (this) {
+        LocationQualitySetting.HIGH_ACCURACY -> LocationRequestCompat.QUALITY_HIGH_ACCURACY
+        LocationQualitySetting.BALANCED -> LocationRequestCompat.QUALITY_BALANCED_POWER_ACCURACY
+        LocationQualitySetting.LOW_POWER -> LocationRequestCompat.QUALITY_LOW_POWER
+    }

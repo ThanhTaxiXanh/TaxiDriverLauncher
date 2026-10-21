@@ -104,7 +104,7 @@ val releaseKeystorePath: String? = System.getenv("RELEASE_KEYSTORE_PATH")
 
 // JUnit category of the screenshot-catalog generator: excluded from the unit
 // test tasks, included only by generateCatalog (both below).
-val catalogCategory = "io.github.seijikohara.femto.catalog.CatalogGeneration"
+val catalogCategory = "com.taxidriver.launcher.catalog.CatalogGeneration"
 
 spotless {
     val ktlintVersion = libs.versions.ktlint.get()

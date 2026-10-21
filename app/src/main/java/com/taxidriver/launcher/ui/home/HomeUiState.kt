@@ -1,0 +1,49 @@
+package com.taxidriver.launcher.ui.home
+
+import android.location.Location
+import androidx.compose.runtime.Immutable
+import com.taxidriver.launcher.data.calendar.CalendarSnapshot
+import com.taxidriver.launcher.data.geocoding.ShortAddress
+import com.taxidriver.launcher.data.location.TripState
+import com.taxidriver.launcher.data.music.MusicCardState
+import com.taxidriver.launcher.data.system.SystemStatus
+import com.taxidriver.launcher.data.weather.WeatherSnapshot
+
+// @Immutable despite android.location.Location being a mutable Java type:
+// LocationRepository emits each Location instance once and never mutates it
+// afterwards, so the immutability promise holds and Compose can skip
+// recomposition on reference equality.
+@Immutable
+internal data class HomeUiState(
+    val location: Location?,
+    val address: ShortAddress?,
+    val weather: WeatherSnapshot?,
+    val musicState: MusicCardState,
+    val calendar: CalendarSnapshot?,
+    val systemStatus: SystemStatus,
+    val tripState: TripState,
+    // Validated-internet connectivity. Drives the live map's offline->online reload
+    // (see WebMapView); starts true so the initial dashboard assumes connectivity
+    // until the connectivity flow reports otherwise.
+    val online: Boolean,
+    // Whether the dock's Settings button carries the update dot: an update is on
+    // offer and a live GPS fix shows the vehicle parked (VehicleMotion.PARKED).
+    // Fail-closed: no fix, a cached fix and a network fix never count as parked,
+    // because the trip speed reads zero until live GPS fixes set it.
+    val updateBadge: Boolean,
+) {
+    companion object {
+        val Initial: HomeUiState =
+            HomeUiState(
+                location = null,
+                address = null,
+                weather = null,
+                musicState = MusicCardState.NeedsPermission,
+                calendar = null,
+                systemStatus = SystemStatus.Initial,
+                tripState = TripState.Initial,
+                online = true,
+                updateBadge = false,
+            )
+    }
+}
