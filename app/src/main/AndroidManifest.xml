@@ -91,7 +91,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FemtoCarLauncher">
         <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
-        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1" />
+        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="3" />
         <service
             android:name="com.taxidriver.launcher.auto.TaxiDriverCarAppService"
             android:exported="true">
