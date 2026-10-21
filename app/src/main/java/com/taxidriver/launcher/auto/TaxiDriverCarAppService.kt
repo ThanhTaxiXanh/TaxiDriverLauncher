@@ -22,6 +22,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.BlurMaskFilter
 import androidx.car.app.CarAppService
 import androidx.car.app.Screen
 import androidx.car.app.Session
@@ -233,20 +234,23 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             val delta = ((target - lastBearing + 540.0) % 360.0) - 180.0
             lastBearing = (lastBearing + delta * 0.3 + 360.0) % 360.0
         }
-        // Keep the location at 62% of the display height using viewport padding.
+        // Target position: 70% screen height with an asymmetric camera viewport.
         // Mapbox positioning depends on the connected host viewport dimensions.
         val height = attachedSurface?.surfaceContainer?.height?.toDouble() ?: 0.0
-        val offset = (height * 0.24).coerceAtLeast(0.0)
-        // In MAP rotation alignment, icon angle is relative to map north.
-        // Camera bearing rotates the map, so zero means forward/up on screen
-        // when the camera follows the filtered vehicle heading.
+        val offset = (height * 0.40).coerceAtLeast(0.0)
+        // A map-aligned icon is oriented to geographical north. Rotate it to
+        // the filtered vehicle bearing; the map camera uses that same bearing.
+        map.getStyle()?.getLayer(layerId)?.let {
+            // Set marker rotation using the same filtered GPS bearing as camera.
+            map.getStyle()?.setStyleLayerProperty(layerId, "icon-rotate", com.mapbox.bindgen.Value(lastBearing))
+        }
         map.setCamera(
             CameraOptions.Builder()
                 .center(point)
                 .padding(EdgeInsets(offset, 0.0, 0.0, 0.0))
                 .zoom(18.0)
                 .bearing(lastBearing)
-                .pitch(65.0)
+                .pitch(60.0)
                 .build(),
         )
         if (!cameraInitialized) {
@@ -286,22 +290,50 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             ?.featureCollection(FeatureCollection.fromFeature(feature))
     }
 
+    /** Compact road-level Chevron: white border, blue fill, subtle soft shadow. */
     private fun createVehicleMarker(): Bitmap {
-        val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.color = Color.rgb(7, 100, 200)
-        canvas.drawCircle(48f, 48f, 37f, paint)
-        paint.color = Color.WHITE
-        canvas.drawCircle(48f, 48f, 32f, paint)
-        paint.color = Color.rgb(0, 114, 235)
-        canvas.drawPath(Path().apply {
-            moveTo(48f, 10f)
-            lineTo(73f, 76f)
-            lineTo(48f, 63f)
-            lineTo(23f, 76f)
+        val chevron = Path().apply {
+            moveTo(64f, 12f)
+            cubicTo(60f, 12f, 56f, 16f, 52f, 22f)
+            lineTo(19f, 87f)
+            quadTo(14f, 99f, 27f, 104f)
+            quadTo(33f, 106f, 39f, 101f)
+            lineTo(64f, 83f)
+            lineTo(89f, 101f)
+            quadTo(95f, 106f, 101f, 104f)
+            quadTo(114f, 99f, 109f, 87f)
+            lineTo(76f, 22f)
+            cubicTo(72f, 16f, 68f, 12f, 64f, 12f)
             close()
-        }, paint)
+        }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(90, 0, 0, 0)
+            style = Paint.Style.FILL
+            setShadowLayer(5f, 0f, 4f, Color.argb(125, 0, 0, 0))
+        }
+        canvas.save()
+        canvas.translate(0f, 4f)
+        canvas.drawPath(chevron, paint)
+        canvas.restore()
+        paint.clearShadowLayer()
+        paint.color = Color.WHITE
+        canvas.drawPath(chevron, paint)
+        paint.color = Color.rgb(43, 146, 244)
+        paint.style = Paint.Style.STROKE
+        paint.strokeJoin = Paint.Join.ROUND
+        paint.strokeWidth = 2f
+        // Inner blue chevron preserves a high-contrast white outline.
+        val inside = Path().apply {
+            moveTo(64f, 24f)
+            lineTo(27f, 94f)
+            lineTo(64f, 71f)
+            lineTo(101f, 94f)
+            close()
+        }
+        paint.style = Paint.Style.FILL
+        canvas.drawPath(inside, paint)
         return bitmap
     }
 
