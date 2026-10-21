@@ -86,7 +86,17 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var lastBearing = 0.0
     private var previousFix: Location? = null
     private val gpsSpeedFilter = GpsSpeedFilter()
+    private val roadLimitPolicy = SpeedLimitPolicy()
     private var speedWidget: DrivingSpeedWidget? = null
+    private var speedLimitWidget: SpeedLimitWidget? = null
+    private val freeDrive by lazy {
+        FreeDriveSpeedLimitController(carContext) { limit, unit, onRoad, reliable ->
+            roadLimitPolicy.onMatchedLimit(
+                limit, unit, onRoad, reliable, SystemClock.elapsedRealtime(),
+            )
+            refreshSpeedHud()
+        }
+    }
     private var speedRefreshActive = false
     private val speedRefresh = object : Runnable {
         override fun run() {
@@ -136,6 +146,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             val widget = DrivingSpeedWidget(isNightInVietnam())
             speedWidget = widget
             mapboxCarMapSurface.mapSurface.addWidget(widget)
+            val limitWidget = SpeedLimitWidget()
+            speedLimitWidget = limitWidget
+            mapboxCarMapSurface.mapSurface.addWidget(limitWidget)
             refreshSpeedHud()
             loadDrivingStyle(mapboxCarMapSurface)
         }
@@ -143,7 +156,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         override fun onDetached(mapboxCarMapSurface: MapboxCarMapSurface) {
             if (attachedSurface === mapboxCarMapSurface) {
                 speedWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
+                speedLimitWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 speedWidget = null
+                speedLimitWidget = null
                 attachedSurface = null
                 styleReady = false
                 cameraInitialized = false
@@ -227,7 +242,12 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     }
 
     private fun refreshSpeedHud() {
-        speedWidget?.update(gpsSpeedFilter.kmh(SystemClock.elapsedRealtime()), isNightInVietnam())
+        val now = SystemClock.elapsedRealtime()
+        val speed = gpsSpeedFilter.kmh(now)
+        val limit = roadLimitPolicy.limitAt(now)
+        val warning = roadLimitPolicy.isOverLimit(speed, now)
+        speedWidget?.update(speed, isNightInVietnam(), warning)
+        speedLimitWidget?.update(limit, warning)
     }
 
     private fun startSpeedRefresh() {
@@ -240,6 +260,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         speedRefreshActive = false
         mainHandler.removeCallbacks(speedRefresh)
         gpsSpeedFilter.reset()
+        roadLimitPolicy.clear()
         refreshSpeedHud()
     }
 
@@ -392,6 +413,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     override fun onStart(owner: LifecycleOwner) {
         startSpeedRefresh()
         startTracking()
+        startRoadMatchingIfPermitted()
     }
 
     override fun onResume(owner: LifecycleOwner) {
@@ -399,8 +421,15 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         // A projected Android Auto screen can attach its map after the service
         // starts; retry registration when the screen becomes interactive.
         startTracking()
+        startRoadMatchingIfPermitted()
         refreshThemeIfNeeded()
         latestLocation?.let(::updateCamera)
+    }
+
+    private fun startRoadMatchingIfPermitted() {
+        val fine = carContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        if (fine) freeDrive.start()
     }
 
     private fun startTracking() {
@@ -466,12 +495,14 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        freeDrive.stop()
         stopSpeedRefresh()
         stopTracking()
         if (lastAcceptedElapsedNanos != 0L) gpsState = "GPS paused"
     }
 
     override fun onDestroy(owner: LifecycleOwner) {
+        freeDrive.stop()
         stopTracking()
         stopSpeedRefresh()
         mainHandler.removeCallbacks(themeCheck)
