@@ -147,7 +147,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         map.setCamera(
             CameraOptions.Builder()
                 .center(point)
-                .padding(EdgeInsets(0.0, 0.0, offset, 0.0))
+                .padding(EdgeInsets(offset, 0.0, 0.0, 0.0))
                 .zoom(17.5)
                 .bearing(lastBearing)
                 .pitch(40.0)
