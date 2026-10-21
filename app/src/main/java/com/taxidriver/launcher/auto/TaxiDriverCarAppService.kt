@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.Geocoder
+import android.os.Handler
+import java.util.Locale
 import android.os.Looper
 import android.os.SystemClock
 import androidx.car.app.CarToast
@@ -40,6 +43,9 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.getSourceAs
 import com.mapbox.maps.extension.style.layers.generated.symbolLayer
+import com.mapbox.maps.extension.style.layers.generated.fillExtrusionLayer
+import com.mapbox.maps.extension.style.expressions.dsl.generated.get
+import com.mapbox.maps.extension.style.expressions.dsl.generated.literal
 import com.mapbox.maps.extension.androidauto.MapboxCarMap
 import com.mapbox.maps.extension.androidauto.MapboxCarMapObserver
 import com.mapbox.maps.extension.androidauto.MapboxCarMapSurface
@@ -77,6 +83,13 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var gpsState = "Waiting for GPS"
     private var lastStatusShown: String? = null
     private var lastAcceptedElapsedNanos = 0L
+    private var roadName: String? = null
+    private var roadLookupLocation: Location? = null
+    private val roadGeocoder by lazy { Geocoder(carContext, Locale("vi", "VN")) }
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val roadSourceId = "taxi-driver-street-chip"
+    private val roadLayerId = "taxi-driver-street-label"
+    private var roadRequestId = 0
     private val markerBitmap by lazy { createVehicleMarker() }
     private val markerId = "taxi-driver-location"
     private val sourceId = "taxi-driver-gps-source"
@@ -99,12 +112,33 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                         iconImage(markerId)
                         iconAllowOverlap(true)
                     }
+                    +fillExtrusionLayer("taxi-driver-buildings-3d", "composite") {
+                        sourceLayer("building")
+                        minZoom(15.0)
+                        fillExtrusionColor("#b0becb")
+                        fillExtrusionOpacity(0.80)
+                        fillExtrusionHeight(12.0)
+                        fillExtrusionBase(0.0)
+                    }
+                    +geoJsonSource(roadSourceId) {
+                        featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+                    }
+                    +symbolLayer(roadLayerId, roadSourceId) {
+                        textField(get { literal("name") })
+                        textSize(14.0)
+                        textColor("#152e4b")
+                        textHaloColor("#ffffff")
+                        textHaloWidth(2.0)
+                        textOffset(listOf(0.0, 4.0))
+                        textAllowOverlap(true)
+                    }
                 },
             ) {
                 if (attachedSurface === mapboxCarMapSurface) {
                     styleReady = true
                     Log.i("TaxiDriverAuto", "Mapbox style ready; GPS state: $gpsState")
                     latestLocation?.let(::updateCamera)
+                    updateRoadLabel()
                 }
             }
         }
@@ -125,6 +159,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             if (gpsState != "GPS active") reportStatus("GPS active")
             lastAcceptedElapsedNanos = SystemClock.elapsedRealtimeNanos()
             updateCamera(location)
+            maybeLookupRoad(location)
         }
     }
 
@@ -159,6 +194,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         val point = Point.fromLngLat(location.longitude, location.latitude)
         // Update marker only when the style is loaded and this is a valid fix.
         map.getStyle()?.getSourceAs<GeoJsonSource>(sourceId)?.geometry(point)
+        updateRoadLabel()
         // GPS bearing is unreliable while stationary. Do not reset to north at stops.
         if (location.hasBearing() && location.speed >= 1.5f) {
             val target = location.bearing.toDouble()
@@ -182,6 +218,37 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             cameraInitialized = true
             Log.i("TaxiDriverAuto", "Initial camera locked to GPS; zoom=17.5")
         }
+    }
+
+    /** Reverse-geocode only after meaningful movement, not once per GPS frame. */
+    private fun maybeLookupRoad(location: Location) {
+        val previous = roadLookupLocation
+        if (previous != null && previous.distanceTo(location) < 45f) return
+        roadLookupLocation = Location(location)
+        if (!Geocoder.isPresent()) return
+        val request = ++roadRequestId
+        roadGeocoder.getFromLocation(location.latitude, location.longitude, 1) { addresses ->
+            mainHandler.post {
+                if (request != roadRequestId) return@post
+                val address = addresses.firstOrNull()
+                val result = address?.thoroughfare ?: address?.subLocality
+                if (!result.isNullOrBlank() && roadName != result) {
+                    roadName = result
+                    updateRoadLabel()
+                }
+            }
+        }
+    }
+
+    private fun updateRoadLabel() {
+        if (!styleReady) return
+        val fix = latestLocation ?: return
+        val name = roadName ?: return
+        val feature = Feature.fromGeometry(Point.fromLngLat(fix.longitude, fix.latitude))
+        feature.addStringProperty("name", name)
+        attachedSurface?.mapSurface?.getMapboxMap()?.getStyle()
+            ?.getSourceAs<GeoJsonSource>(roadSourceId)
+            ?.featureCollection(FeatureCollection.fromFeature(feature))
     }
 
     private fun createVehicleMarker(): Bitmap {
