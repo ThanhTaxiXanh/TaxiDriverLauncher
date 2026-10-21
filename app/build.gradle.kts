@@ -156,6 +156,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // Public token is bundled into the APK; the secret downloads token never is.
+        val mapboxToken = System.getenv("MAPBOX_ACCESS_TOKEN") ?: ""
+        resValue("string", "mapbox_access_token", mapboxToken)
         buildConfigField("String", "GEOCODER_BASE_URL", "\"${geocoderBaseUrl}\"")
         buildConfigField("String", "GEOCODER_API_KEY", "\"${geocoderApiKey}\"")
         buildConfigField("String", "WEATHER_BASE_URL", "\"${weatherBaseUrl}\"")
@@ -314,6 +317,7 @@ aboutLibraries {
 }
 
 dependencies {
+    implementation("com.mapbox.extension:maps-androidauto:11.30.0")
     implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.car.app:app-projected:1.7.0")
     implementation(libs.androidx.core.ktx)
