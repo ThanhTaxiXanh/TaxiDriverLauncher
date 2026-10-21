@@ -9,6 +9,8 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Looper
 import android.os.SystemClock
+import androidx.car.app.CarToast
+import android.widget.Toast
 import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -66,12 +68,14 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         carContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var attachedSurface: MapboxCarMapSurface? = null
     private var latestLocation: Location? = null
+    private val registeredProviders = mutableSetOf<String>()
     private var tracking = false
     private var lastBearing = 0.0
     private var previousFix: Location? = null
     private var styleReady = false
     private var cameraInitialized = false
     private var gpsState = "Waiting for GPS"
+    private var lastStatusShown: String? = null
     private var lastAcceptedElapsedNanos = 0L
     private val markerBitmap by lazy { createVehicleMarker() }
     private val markerId = "taxi-driver-location"
@@ -118,7 +122,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         if (acceptFix(location)) {
             previousFix = location
             latestLocation = location
-            gpsState = "GPS active"
+            if (gpsState != "GPS active") reportStatus("GPS active")
             lastAcceptedElapsedNanos = SystemClock.elapsedRealtimeNanos()
             updateCamera(location)
         }
@@ -197,49 +201,89 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         return bitmap
     }
 
+    private fun reportStatus(status: String) {
+        gpsState = status
+        Log.i("TaxiDriverAuto", "GPS status: $status")
+        if (lastStatusShown != status) {
+            lastStatusShown = status
+            CarToast.makeText(carContext, status, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onStart(owner: LifecycleOwner) {
+        startTracking()
+    }
+
+    override fun onResume(owner: LifecycleOwner) {
+        // A projected Android Auto screen can attach its map after the service
+        // starts; retry registration when the screen becomes interactive.
+        startTracking()
+        latestLocation?.let(::updateCamera)
+    }
+
+    private fun startTracking() {
         val fine = carContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
         val coarse = carContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
-        if ((!fine && !coarse) || tracking) {
-            if (!fine && !coarse) gpsState = "Location permission required"
+        if (!fine && !coarse) {
+            reportStatus("Taxi Driver: grant location permission on phone")
             return
         }
+        if (tracking) return
         try {
-            val provider = when {
-                fine && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
-                    LocationManager.GPS_PROVIDER
-                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
-                    LocationManager.NETWORK_PROVIDER
-                else -> return
-            }
-            locationManager.getLastKnownLocation(provider)?.let {
-                if (acceptFix(it)) {
-                    previousFix = it
-                    latestLocation = it
-                    updateCamera(it)
+            val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .filter { provider ->
+                    (provider != LocationManager.GPS_PROVIDER || fine) &&
+                        locationManager.isProviderEnabled(provider)
                 }
+            if (providers.isEmpty()) {
+                reportStatus("Taxi Driver: enable device location")
+                return
             }
-            gpsState = "Searching GPS"
-            locationManager.requestLocationUpdates(provider, 500L, 0f, gpsListener, Looper.getMainLooper())
-            tracking = true
-        } catch (_: SecurityException) {
-            tracking = false
-        } catch (_: IllegalArgumentException) {
-            tracking = false
+            // Start listeners FIRST. Last-known positions can be stale and must
+            // never stop or postpone acquisition of a fresh fix.
+            for (provider in providers) {
+                locationManager.requestLocationUpdates(
+                    provider, 500L, 0f, gpsListener, Looper.getMainLooper(),
+                )
+                registeredProviders.add(provider)
+            }
+            tracking = registeredProviders.isNotEmpty()
+            reportStatus("Taxi Driver: searching GPS")
+            providers.mapNotNull(locationManager::getLastKnownLocation)
+                .sortedByDescending(Location::getElapsedRealtimeNanos)
+                .firstOrNull(::acceptFix)?.let { fix ->
+                    previousFix = fix
+                    latestLocation = fix
+                    updateCamera(fix)
+                }
+        } catch (exception: SecurityException) {
+            stopTracking()
+            reportStatus("Taxi Driver: location permission denied")
+            Log.w("TaxiDriverAuto", "Location registration denied", exception)
+        } catch (exception: IllegalArgumentException) {
+            stopTracking()
+            reportStatus("Taxi Driver: GPS provider unavailable")
+            Log.w("TaxiDriverAuto", "Location provider unavailable", exception)
         }
     }
 
-    override fun onStop(owner: LifecycleOwner) {
-        if (tracking) locationManager.removeUpdates(gpsListener)
+    private fun stopTracking() {
+        if (registeredProviders.isNotEmpty()) {
+            locationManager.removeUpdates(gpsListener)
+            registeredProviders.clear()
+        }
         tracking = false
+    }
+
+    override fun onStop(owner: LifecycleOwner) {
+        stopTracking()
         if (lastAcceptedElapsedNanos != 0L) gpsState = "GPS paused"
     }
 
     override fun onDestroy(owner: LifecycleOwner) {
-        if (tracking) locationManager.removeUpdates(gpsListener)
-        tracking = false
+        stopTracking()
         lifecycle.removeObserver(this)
     }
 
