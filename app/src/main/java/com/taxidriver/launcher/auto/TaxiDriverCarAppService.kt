@@ -9,6 +9,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -30,6 +31,8 @@ import com.mapbox.maps.MapInitOptions
 import com.mapbox.maps.Style
 import com.mapbox.maps.EdgeInsets
 import com.mapbox.maps.extension.style.style
+import com.mapbox.geojson.Feature
+import com.mapbox.geojson.FeatureCollection
 import com.mapbox.maps.extension.style.image.image
 import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
@@ -67,6 +70,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var lastBearing = 0.0
     private var previousFix: Location? = null
     private var styleReady = false
+    private var cameraInitialized = false
+    private var gpsState = "Waiting for GPS"
+    private var lastAcceptedElapsedNanos = 0L
     private val markerBitmap by lazy { createVehicleMarker() }
     private val markerId = "taxi-driver-location"
     private val sourceId = "taxi-driver-gps-source"
@@ -76,12 +82,14 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         override fun onAttached(mapboxCarMapSurface: MapboxCarMapSurface) {
             attachedSurface = mapboxCarMapSurface
             styleReady = false
+            cameraInitialized = false
             // Streets uses higher road/label contrast than the previous near-black DARK style.
             mapboxCarMapSurface.mapSurface.getMapboxMap().loadStyle(
                 style(Style.MAPBOX_STREETS) {
                     +image(markerId, markerBitmap)
+                    // An empty source prevents a phantom marker at the equator.
                     +geoJsonSource(sourceId) {
-                        geometry(Point.fromLngLat(0.0, 0.0))
+                        featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
                     }
                     +symbolLayer(layerId, sourceId) {
                         iconImage(markerId)
@@ -91,6 +99,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             ) {
                 if (attachedSurface === mapboxCarMapSurface) {
                     styleReady = true
+                    Log.i("TaxiDriverAuto", "Mapbox style ready; GPS state: $gpsState")
                     latestLocation?.let(::updateCamera)
                 }
             }
@@ -100,6 +109,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             if (attachedSurface === mapboxCarMapSurface) {
                 attachedSurface = null
                 styleReady = false
+                cameraInitialized = false
             }
         }
     }
@@ -108,6 +118,8 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         if (acceptFix(location)) {
             previousFix = location
             latestLocation = location
+            gpsState = "GPS active"
+            lastAcceptedElapsedNanos = SystemClock.elapsedRealtimeNanos()
             updateCamera(location)
         }
     }
@@ -119,10 +131,16 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
 
     /** Reject old/out-of-order fixes, huge accuracy circles, and impossible jumps. */
     private fun acceptFix(fix: Location): Boolean {
-        if (fix.isFromMockProvider || !fix.hasAccuracy() || fix.accuracy > 70f) return false
+        if (fix.isFromMockProvider || !fix.hasAccuracy() || fix.accuracy > 100f) {
+            Log.d("TaxiDriverAuto", "GPS rejected: mock or inaccurate fix")
+            return false
+        }
         if (fix.latitude !in -90.0..90.0 || fix.longitude !in -180.0..180.0) return false
         val ageMillis = (SystemClock.elapsedRealtimeNanos() - fix.elapsedRealtimeNanos) / 1_000_000L
-        if (ageMillis !in 0..10_000L) return false
+        if (ageMillis !in 0..15_000L) {
+            Log.d("TaxiDriverAuto", "GPS rejected: stale fix age=$ageMillis ms")
+            return false
+        }
         val old = previousFix ?: return true
         val dt = (fix.elapsedRealtimeNanos - old.elapsedRealtimeNanos) / 1_000_000_000.0
         if (dt <= 0.0) return false
@@ -133,6 +151,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         if (!styleReady) return
         val map = attachedSurface?.mapSurface?.getMapboxMap() ?: return
         val point = Point.fromLngLat(location.longitude, location.latitude)
+        // Update marker only when the style is loaded and this is a valid fix.
         map.getStyle()?.getSourceAs<GeoJsonSource>(sourceId)?.geometry(point)
         // GPS bearing is unreliable while stationary. Do not reset to north at stops.
         if (location.hasBearing() && location.speed >= 1.5f) {
@@ -153,6 +172,10 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 .pitch(40.0)
                 .build(),
         )
+        if (!cameraInitialized) {
+            cameraInitialized = true
+            Log.i("TaxiDriverAuto", "Initial camera locked to GPS; zoom=17.5")
+        }
     }
 
     private fun createVehicleMarker(): Bitmap {
@@ -179,7 +202,10 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             PackageManager.PERMISSION_GRANTED
         val coarse = carContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
-        if (!fine && !coarse || tracking) return
+        if ((!fine && !coarse) || tracking) {
+            if (!fine && !coarse) gpsState = "Location permission required"
+            return
+        }
         try {
             val provider = when {
                 fine && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
@@ -195,6 +221,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                     updateCamera(it)
                 }
             }
+            gpsState = "Searching GPS"
             locationManager.requestLocationUpdates(provider, 500L, 0f, gpsListener, Looper.getMainLooper())
             tracking = true
         } catch (_: SecurityException) {
@@ -207,6 +234,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     override fun onStop(owner: LifecycleOwner) {
         if (tracking) locationManager.removeUpdates(gpsListener)
         tracking = false
+        if (lastAcceptedElapsedNanos != 0L) gpsState = "GPS paused"
     }
 
     override fun onDestroy(owner: LifecycleOwner) {
