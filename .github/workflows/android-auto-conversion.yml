@@ -36,7 +36,7 @@ jobs:
         run: |
           test -n "$MAPBOX_ACCESS_TOKEN" || { echo "::error::Missing MAPBOX_ACCESS_TOKEN"; exit 1; }
           test -n "$MAPBOX_DOWNLOADS_TOKEN" || { echo "::error::Missing MAPBOX_DOWNLOADS_TOKEN"; exit 1; }
-          ./gradlew :app:assembleStableDebug --stacktrace
+          ./gradlew :app:testStableDebugUnitTest :app:assembleStableDebug --stacktrace
       - uses: actions/upload-artifact@v4
         if: success()
         with:
