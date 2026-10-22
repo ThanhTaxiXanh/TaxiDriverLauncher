@@ -21,6 +21,10 @@ jobs:
           python-version: '3.12'
       - name: Install OSM extract dependency
         run: python -m pip install --disable-pip-version-check "osmium==4.3.0"
+      - name: Validate script syntax and speed sign parser
+        run: |
+          python -m py_compile .github/scripts/build-vietnam-osm.py
+          python .github/scripts/test-vietnam-osm.py
       - name: Download source Vietnam PBF from Geofabrik
         run: |
           mkdir -p /tmp/osm-vn
@@ -36,6 +40,15 @@ jobs:
           test -s /tmp/osm-vn/out/vietnam_speed_limits.json
           test -s /tmp/osm-vn/out/vietnam_traffic_signs.json
           test -s /tmp/osm-vn/out/vietnam_road_data.db.gz
+          python3 - <<'PY'
+          import sqlite3
+          db = sqlite3.connect("/tmp/osm-vn/out/vietnam_road_data.db")
+          schema = db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()[0]
+          count = db.execute("SELECT count(*) FROM signs WHERE kind='SPEED_LIMIT' AND speed_limit_kmh IS NOT NULL").fetchone()[0]
+          assert schema == "2", schema
+          print("Schema v2: signed numeric speed limit positions:", count)
+          db.close()
+          PY
       - name: Upload dataset artifact (JSON and SQLite)
         uses: actions/upload-artifact@v4
         with:
