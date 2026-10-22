@@ -72,4 +72,13 @@ class SpeedGeometryMatcherTest {
             listOf(c), listOf("Lê An"), 270.0, 4f,
         ).limitKmh)
     }
+    @Test fun contradictoryMapboxRoadNameBlocksGeometryFallback() {
+        val r = SpeedGeometryMatcher.match(
+            listOf(tagged(name = "Lê An")),
+            listOf("Nguyễn Công Hãng"), 90.0, 4f,
+        )
+        assertNull(r.limitKmh)
+        assertEquals(SpeedLimitDiagnostic.ROAD_NAME_MISMATCH, r.reason)
+    }
+
 }
