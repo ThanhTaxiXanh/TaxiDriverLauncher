@@ -65,6 +65,11 @@ internal object SpeedGeometryMatcher {
                 SpeedLimitMatch(plausible.first(), SpeedLimitDiagnostic.VERIFIED)
             } else SpeedLimitMatch(null, SpeedLimitDiagnostic.CONFLICT)
         }
+        // A reliable Mapbox road name that conflicts with OSM geometry is a
+        // hard mismatch. Never override an explicit contradictory road match.
+        if (named.isNotEmpty()) {
+            return SpeedLimitMatch(null, SpeedLimitDiagnostic.ROAD_NAME_MISMATCH)
+        }
         // Fail closed if GPS horizontal accuracy is too weak to disambiguate roads.
         if (accuracyMeters == null || accuracyMeters > 12f || accuracyMeters <= 0f) {
             return SpeedLimitMatch(null, SpeedLimitDiagnostic.ROAD_UNMATCHED)
