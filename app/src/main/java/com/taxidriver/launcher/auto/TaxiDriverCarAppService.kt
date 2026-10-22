@@ -110,7 +110,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var upcomingWarningId: Long? = null
     private var lastNationalQueryMillis = -1L
     private val nationalRoadData by lazy {
-        NationalRoadDataRepository(carContext) { pins, limit, usable, source, reason ->
+        NationalRoadDataRepository(carContext, onUpdate = { pins, limit, usable, source, reason ->
             nationalPins = pins
             nationalSpeedLimit = limit
             nationalDatasetUsable = usable
@@ -122,7 +122,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             taggedRoadSpeeds = roads
             taggedRoadsUpdatedMillis = SystemClock.elapsedRealtime()
             refreshRoadSpeedMap()
-        }
+        })
     }
     private val mapSignSourceId = "taxi-osm-nearby-signs"
     private val mapSignLayerId = "taxi-osm-nearby-signs-layer"
