@@ -35,14 +35,14 @@ jobs:
           mkdir -p app/src/main/assets
           curl --fail --location --retry 3 --connect-timeout 20 --max-time 180 \
             "https://github.com/ThanhTaxiXanh/TaxiDriverLauncher/releases/download/vietnam-osm-data/vietnam_road_data.db.gz" \
-            --output app/src/main/assets/vietnam_road_data.db.gz
+            --output app/src/main/assets/vietnam_road_data.osmcache
           python3 - <<'PY'
           import gzip
           import shutil
           import sqlite3
           from pathlib import Path
 
-          compressed = Path("app/src/main/assets/vietnam_road_data.db.gz")
+          compressed = Path("app/src/main/assets/vietnam_road_data.osmcache")
           path = Path("/tmp/vietnam_road_data_verified.db")
           with gzip.open(compressed, "rb") as source, path.open("wb") as target:
               shutil.copyfileobj(source, target)
@@ -76,8 +76,8 @@ jobs:
               candidates = [name for name in names if "vietnam_road_data" in name]
               print("Matching APK entries:", candidates)
               print("Sample assets:", [name for name in names if name.startswith("assets/")][:18])
-              assert "assets/vietnam_road_data.db.gz" in names, "OSM SQLite was omitted from the APK"
-              assert apk.getinfo("assets/vietnam_road_data.db.gz").file_size > 500000, "Empty OSM asset"
+              assert "assets/vietnam_road_data.osmcache" in names, "OSM SQLite was omitted from the APK"
+              assert apk.getinfo("assets/vietnam_road_data.osmcache").file_size > 500000, "Empty OSM asset"
               print("Verified bundled Vietnam OSM asset in APK")
           PY
       - uses: actions/upload-artifact@v4
