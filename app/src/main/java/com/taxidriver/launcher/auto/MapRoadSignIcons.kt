@@ -82,21 +82,40 @@ internal object MapRoadSignIcons {
                 canvas.drawText("i", 48f, 61f, paint)
             }
             RoadSignKind.RAILWAY, RoadSignKind.PEDESTRIAN, RoadSignKind.HAZARD -> {
-                paint.color = Color.rgb(204, 37, 43)
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 8f
-                canvas.drawCircle(48f, 45f, 36f, paint)
-                paint.style = Paint.Style.FILL
-                paint.color = Color.rgb(25, 40, 61)
-                paint.textAlign = Paint.Align.CENTER
-                paint.textSize = 38f
-                paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-                val symbol = when (kind) {
-                    RoadSignKind.RAILWAY -> "X"
-                    RoadSignKind.PEDESTRIAN -> "P"
-                    else -> "!"
+                // Reflective warning triangle, visually distinct from speed circles.
+                val outer = Path().apply {
+                    moveTo(48f, 5f)
+                    lineTo(91f, 85f)
+                    lineTo(5f, 85f)
+                    close()
                 }
-                canvas.drawText(symbol, 48f, 57f, paint)
+                paint.color = Color.rgb(218, 40, 43)
+                canvas.drawPath(outer, paint)
+                val inner = Path().apply {
+                    moveTo(48f, 20f)
+                    lineTo(78f, 76f)
+                    lineTo(18f, 76f)
+                    close()
+                }
+                paint.color = Color.rgb(255, 242, 150)
+                canvas.drawPath(inner, paint)
+                paint.color = Color.rgb(26, 29, 33)
+                paint.style = Paint.Style.FILL
+                paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                paint.textAlign = Paint.Align.CENTER
+                if (kind == RoadSignKind.RAILWAY) {
+                    // Train front and rails without relying on emoji fonts.
+                    canvas.drawRoundRect(RectF(34f, 44f, 62f, 67f), 4f, 4f, paint)
+                    paint.color = Color.WHITE
+                    canvas.drawRect(RectF(38f, 48f, 46f, 55f), paint)
+                    canvas.drawRect(RectF(50f, 48f, 58f, 55f), paint)
+                    paint.color = Color.rgb(26, 29, 33)
+                    canvas.drawCircle(39f, 68f, 3f, paint)
+                    canvas.drawCircle(57f, 68f, 3f, paint)
+                } else {
+                    paint.textSize = 35f
+                    canvas.drawText(if (kind == RoadSignKind.PEDESTRIAN) "!" else "!", 48f, 70f, paint)
+                }
             }
         }
         // A vertical connector keeps the actual OSM point below the floating
