@@ -90,6 +90,19 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var speedWidget: DrivingSpeedWidget? = null
     private var speedLimitWidget: SpeedLimitWidget? = null
     private var roadSignWidget: RoadSignWidget? = null
+    private var nationalPins: List<OsmMapSign> = emptyList()
+    private var nationalDatasetUsable = false
+    private var nationalSpeedLimit: Int? = null
+    private var lastNationalQueryMillis = -1L
+    private val nationalRoadData by lazy {
+        NationalRoadDataRepository(carContext) { pins, limit, usable ->
+            nationalPins = pins
+            nationalSpeedLimit = limit
+            nationalDatasetUsable = usable
+            lastNationalQueryMillis = SystemClock.elapsedRealtime()
+            refreshSpeedHud()
+        }
+    }
     private val mapSignSourceId = "taxi-osm-nearby-signs"
     private val mapSignLayerId = "taxi-osm-nearby-signs-layer"
     private var lastNearbySignsSignature: String? = null
@@ -111,6 +124,11 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 lastMatchedRoadMillis = SystemClock.elapsedRealtime()
                 refreshSignHud()
                 maybeRequestSigns()
+                latestLocation?.let { fix ->
+                    nationalRoadData.maybeLookup(
+                        fix, matchedRoadNames, matchedRoadReliable,
+                    )
+                }
             },
         ) { limit, unit, onRoad, reliable ->
             roadLimitPolicy.onMatchedLimit(
@@ -282,6 +300,11 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             updateCamera(location)
             maybeLookupRoad(location)
             maybeRequestSigns()
+            nationalRoadData.maybeLookup(
+                location, matchedRoadNames,
+                matchedRoadReliable &&
+                    SystemClock.elapsedRealtime() - lastMatchedRoadMillis in 0L..4_000L,
+            )
         }
     }
 
@@ -294,8 +317,17 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private fun refreshSpeedHud() {
         val now = SystemClock.elapsedRealtime()
         val speed = gpsSpeedFilter.kmh(now)
-        val limit = roadLimitPolicy.limitAt(now)
-        val warning = roadLimitPolicy.isOverLimit(speed, now)
+        val matchedLimit = roadLimitPolicy.limitAt(now)
+        val localLimit = nationalSpeedLimit?.takeIf {
+            lastNationalQueryMillis >= 0L && now - lastNationalQueryMillis in 0L..6_000L &&
+                matchedRoadReliable && now - lastMatchedRoadMillis in 0L..4_000L
+        }
+        // Conflicting verified sources mean unknown, not an arbitrary choice.
+        val limit = when {
+            matchedLimit != null && localLimit != null && matchedLimit != localLimit -> null
+            else -> matchedLimit ?: localLimit
+        }
+        val warning = limit != null && speed != null && speed > limit + 3
         speedWidget?.update(speed, isNightInVietnam(), warning)
         speedLimitWidget?.update(limit, warning)
         refreshSignHud()
@@ -334,9 +366,11 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             (now - fix.elapsedRealtimeNanos / 1_000_000L) in 0L..6_000L
         val nearby = if (valid && fix != null) {
             val car = RoadCoordinate(fix.latitude, fix.longitude)
-            RoadSignPolicy.visibleWithinRadius(
-                car, roadSignRepository.nearbyMapNodes(car), 500.0,
-            )
+            val sources = if (nationalDatasetUsable &&
+                lastNationalQueryMillis >= 0L &&
+                now - lastNationalQueryMillis in 0L..8_000L
+            ) nationalPins else roadSignRepository.nearbyMapNodes(car)
+            RoadSignPolicy.visibleWithinRadius(car, sources, 500.0)
         } else emptyList()
         // Distance label changes only every 10m, avoiding reloading GeoJSON
         // on each 500ms GPS fix.
@@ -366,6 +400,8 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         if (!speedRefreshActive || !fix.hasAccuracy() || fix.accuracy > 35f ||
             (now - fix.elapsedRealtimeNanos / 1_000_000L) !in 0L..6_000L
         ) return
+        // Live Overpass remains a fallback for directional warning geometry.
+        // The national dataset supplies faster offline pins and road limits.
         roadSignRepository.maybeFetch(RoadCoordinate(fix.latitude, fix.longitude))
     }
 
@@ -383,6 +419,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         matchedRoadNames = emptyList()
         matchedRoadReliable = false
         lastMatchedRoadMillis = -1L
+        nationalPins = emptyList()
+        nationalSpeedLimit = null
+        lastNationalQueryMillis = -1L
         refreshSpeedHud()
     }
 
@@ -533,12 +572,14 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     }
 
     override fun onStart(owner: LifecycleOwner) {
+        nationalRoadData.start()
         startSpeedRefresh()
         startTracking()
         startRoadMatchingIfPermitted()
     }
 
     override fun onResume(owner: LifecycleOwner) {
+        nationalRoadData.start()
         startSpeedRefresh()
         // A projected Android Auto screen can attach its map after the service
         // starts; retry registration when the screen becomes interactive.
@@ -626,6 +667,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     override fun onDestroy(owner: LifecycleOwner) {
         freeDrive.stop()
         roadSignRepository.close()
+        nationalRoadData.stop()
         stopTracking()
         stopSpeedRefresh()
         mainHandler.removeCallbacks(themeCheck)
