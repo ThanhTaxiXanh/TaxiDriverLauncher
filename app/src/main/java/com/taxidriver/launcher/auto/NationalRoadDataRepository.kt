@@ -55,6 +55,7 @@ internal class NationalRoadDataRepository(
     private data class Query(
         val lat: Double, val lon: Double,
         val bearing: Double?, val reliableRoadNames: List<String>,
+        val gpsAccuracyMeters: Float?,
     )
     private data class NearbySpeed(val distance: Double, val speedKmh: Int)
     private data class RoadVector(val distance: Double, val heading: Double)
@@ -74,7 +75,6 @@ internal class NationalRoadDataRepository(
                     if (sqlite == null) installBundledAsset()
                     if (sqlite != null) {
                         latestRequest?.let(::lookup)
-                        notifyStatus()
                     } else {
                         cacheSource = "CHƯA NẠP"
                         notifyStatus()
@@ -92,11 +92,12 @@ internal class NationalRoadDataRepository(
         if (closed || !started || !fix.hasAccuracy() || fix.accuracy > 35f) return
         val now = SystemClock.elapsedRealtime()
         if (now - fix.elapsedRealtimeNanos / 1_000_000L !in 0L..6_000L) return
-        val bearing = if (trustedRoad && fix.hasBearing() &&
+        val bearing = if (fix.hasBearing() &&
             fix.hasSpeed() && fix.speed >= 1.5f) fix.bearing.toDouble() else null
         latestRequest = Query(
             fix.latitude, fix.longitude, bearing,
             if (trustedRoad) names else emptyList(),
+            if (fix.hasAccuracy()) fix.accuracy else null,
         )
         maybeCheckForUpdate()
         if (busy || now - lastLookupMs < 3_000L) return
@@ -124,7 +125,7 @@ internal class NationalRoadDataRepository(
         )
         try {
             val schema = db.rawQuery("SELECT value FROM meta WHERE key='schema'", null)
-                .use { it.moveToFirst() && it.getString(0) == "1" }
+                .use { it.moveToFirst() && it.getString(0) == "2" }
             if (!schema) return false
             return db.rawQuery("SELECT COUNT(*) FROM signs", null)
                 .use { it.moveToFirst() && it.getInt(0) > 0 } &&
@@ -188,8 +189,8 @@ internal class NationalRoadDataRepository(
             if (sqlite == null) throw IllegalStateException("Unable to open new OSM cache")
             cacheSource = newSource
             old.delete()
-            notifyStatus()
-            latestRequest?.let(::lookup)
+            if (latestRequest == null) notifyStatus()
+            else latestRequest?.let(::lookup)
             Log.i("TaxiDriverAuto", "Vietnam OSM: $newSource cached database ready")
         } catch (e: Exception) {
             database.delete()
@@ -269,7 +270,7 @@ internal class NationalRoadDataRepository(
         )
         try {
             db.rawQuery(
-                "SELECT id,lat,lon,kind FROM signs " +
+                "SELECT id,lat,lon,kind,speed_limit_kmh FROM signs " +
                     "WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? LIMIT 800",
                 args,
             ).use { cursor ->
@@ -280,16 +281,12 @@ internal class NationalRoadDataRepository(
                         RoadSignKind.OTHER
                     }
                     val position = RoadCoordinate(cursor.getDouble(1), cursor.getDouble(2))
-                    pins.add(OsmMapSign(cursor.getLong(0), kind, position))
+                    val signedSpeed = if (cursor.isNull(4)) null
+                        else cursor.getInt(4).takeIf { it in 5..200 }
+                    pins.add(OsmMapSign(cursor.getLong(0), kind, position, signedSpeed))
                 }
             }
-            val result = when {
-                q.reliableRoadNames.isEmpty() ->
-                    SpeedLimitMatch(null, SpeedLimitDiagnostic.ROAD_UNMATCHED)
-                q.bearing == null ->
-                    SpeedLimitMatch(null, SpeedLimitDiagnostic.HEADING_MISSING)
-                else -> findSpeedLimit(db, q)
-            }
+            val result = findSpeedLimit(db, q)
             handler.post {
                 if (!closed) onUpdate(pins, result.limitKmh, true, cacheSource, result.reason)
             }
@@ -298,64 +295,37 @@ internal class NationalRoadDataRepository(
         }
     }
 
-    /**
-     * Conservative same-way matching. Reducing the candidate rectangle from
-     * 550 m to 100 m prevents arbitrary SQL LIMIT truncation on dense streets.
-     * No limit is displayed unless road name, geometry and bearing all agree.
+    /** First find all tagged OSM ways spatially; pure logic verifies bearing,
+     * road-name agreement or precise unambiguous GPS geometry.
      */
     private fun findSpeedLimit(db: SQLiteDatabase, q: Query): SpeedLimitMatch {
-        val names = q.reliableRoadNames.map(::normalizeRoad).filter(String::isNotEmpty).toSet()
-        if (names.isEmpty()) {
-            return SpeedLimitMatch(null, SpeedLimitDiagnostic.ROAD_UNMATCHED)
-        }
-        val latSpan = 100.0 / 111_320.0
+        val latSpan = 75.0 / 111_320.0
         val lonSpan = latSpan / cos(Math.toRadians(q.lat)).coerceAtLeast(0.2)
-        var tagged = 0
-        var named = 0
-        var close = 0
-        var aligned = 0
-        val options = mutableListOf<NearbySpeed>()
+        val candidates = mutableListOf<OsmSpeedCandidate>()
         db.rawQuery(
-            "SELECT name,maxspeed_kmh,forward_kmh,backward_kmh,geometry " +
-                "FROM speed_segments WHERE minlat<=? AND maxlat>=? AND minlon<=? " +
-                "AND maxlon>=? LIMIT 1500",
+            "SELECT way_id,name,maxspeed_kmh,forward_kmh,backward_kmh,geometry " +
+                "FROM speed_segments WHERE minlat<=? AND maxlat>=? " +
+                "AND minlon<=? AND maxlon>=? LIMIT 1500",
             arrayOf(
                 (q.lat + latSpan).toString(), (q.lat - latSpan).toString(),
                 (q.lon + lonSpan).toString(), (q.lon - lonSpan).toString(),
             ),
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                tagged++
-                if (normalizeRoad(cursor.getString(0)) !in names) continue
-                named++
-                val coordinates = JSONArray(cursor.getString(4))
-                val nearest = nearestSegment(q, coordinates) ?: continue
-                if (nearest.distance > 24.0) continue
-                close++
-                val signedHeading = abs(
-                    ((nearest.heading - q.bearing!! + 540.0) % 360.0) - 180.0,
+                val nearest = nearestSegment(q, JSONArray(cursor.getString(5))) ?: continue
+                if (nearest.distance > 28.0) continue
+                candidates.add(
+                    OsmSpeedCandidate(
+                        cursor.getLong(0),
+                        nearest.distance, nearest.heading, cursor.getString(1),
+                        cursor.getNullableInt(3), cursor.getNullableInt(4),
+                        cursor.getNullableInt(2),
+                    ),
                 )
-                val forward = signedHeading <= 35.0
-                val backward = signedHeading >= 145.0
-                if (!forward && !backward) continue
-                val selected = if (forward) cursor.getNullableInt(2)
-                    else cursor.getNullableInt(3)
-                val limit = selected ?: cursor.getNullableInt(1) ?: continue
-                if (limit !in 5..200) continue
-                aligned++
-                options.add(NearbySpeed(nearest.distance, limit))
             }
         }
-        if (options.isEmpty()) {
-            return SpeedLimitDiagnosticPolicy.classify(
-                tagged, named, close, aligned, emptySet(),
-            )
-        }
-        val nearest = options.minOf { it.distance }
-        val candidateLimits = options.filter { it.distance <= nearest + 7.0 }
-            .map { it.speedKmh }.toSet()
-        return SpeedLimitDiagnosticPolicy.classify(
-            tagged, named, close, aligned, candidateLimits,
+        return SpeedGeometryMatcher.match(
+            candidates, q.reliableRoadNames, q.bearing, q.gpsAccuracyMeters,
         )
     }
 
