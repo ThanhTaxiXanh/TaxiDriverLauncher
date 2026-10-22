@@ -92,6 +92,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var speedWidget: DrivingSpeedWidget? = null
     private var speedLimitWidget: SpeedLimitWidget? = null
     private var roadSignWidget: RoadSignWidget? = null
+    private var offscreenSignWidget: OffscreenRoadSignWidget? = null
     private var diagnosticWidget: VietnamDataDebugWidget? = null
     private var nationalCacheSource = "CHƯA NẠP"
     private var nationalPins: List<OsmMapSign> = emptyList()
@@ -201,6 +202,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             val signWidget = RoadSignWidget(isNightInVietnam())
             roadSignWidget = signWidget
             mapboxCarMapSurface.mapSurface.addWidget(signWidget)
+            offscreenSignWidget = OffscreenRoadSignWidget(isNightInVietnam()).also {
+                mapboxCarMapSurface.mapSurface.addWidget(it)
+            }
             if (com.taxidriver.launcher.BuildConfig.DEBUG) {
                 diagnosticWidget = VietnamDataDebugWidget().also {
                     mapboxCarMapSurface.mapSurface.addWidget(it)
@@ -215,6 +219,8 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 speedWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 speedLimitWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 roadSignWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
+                offscreenSignWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
+                offscreenSignWidget = null
                 diagnosticWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 diagnosticWidget = null
                 speedWidget = null
@@ -277,6 +283,14 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                         iconSize(0.78)
                         iconPitchAlignment(IconPitchAlignment.VIEWPORT)
                         iconRotationAlignment(IconRotationAlignment.VIEWPORT)
+                        // Numeric value is OSM-tagged; blank for other signs.
+                        textField(get { literal("badge") })
+                        textColor("#142031")
+                        textHaloColor("#ffffff")
+                        textHaloWidth(0.8)
+                        textSize(22.0)
+                        textOffset(listOf(0.0, -3.0))
+                        textAllowOverlap(true)
                     }
                     +symbolLayer(mapSignLabelsId, mapSignSourceId) {
                         textField(get { literal("label") })
@@ -342,7 +356,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         val matchedLimit = roadLimitPolicy.limitAt(now)
         val localLimit = nationalSpeedLimit?.takeIf {
             lastNationalQueryMillis >= 0L && now - lastNationalQueryMillis in 0L..6_000L &&
-                matchedRoadReliable && now - lastMatchedRoadMillis in 0L..4_000L
+                nationalLimitDiagnostic in setOf(
+                    SpeedLimitDiagnostic.VERIFIED, SpeedLimitDiagnostic.VERIFIED_GEOMETRY,
+                )
         }
         val conflicting = matchedLimit != null && localLimit != null &&
             matchedLimit != localLimit
@@ -434,11 +450,26 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         val displayed = MapSignPresentation.display(
             inView, maxItems = 5, preferredId = upcomingWarningId,
         )
+        if (valid && fix != null) {
+            offscreenSignWidget?.update(
+                OffscreenRoadSignPolicy.suggest(
+                    RoadCoordinate(fix.latitude, fix.longitude),
+                    if (fix.hasBearing()) fix.bearing.toDouble() else null,
+                    nearby,
+                    displayed.map { it.sign.id }.toSet(),
+                ),
+                isNightInVietnam(),
+            )
+        } else {
+            offscreenSignWidget?.update(emptyList(), isNightInVietnam())
+        }
         val nowLimit = roadLimitPolicy.limitAt(now)
         val currentLocal = nationalSpeedLimit?.takeIf {
             lastNationalQueryMillis >= 0L &&
                 now - lastNationalQueryMillis in 0L..6_000L &&
-                matchedRoadReliable && now - lastMatchedRoadMillis in 0L..4_000L
+                nationalLimitDiagnostic in setOf(
+                    SpeedLimitDiagnostic.VERIFIED, SpeedLimitDiagnostic.VERIFIED_GEOMETRY,
+                )
         }
         val diagnostic = when {
             nowLimit != null && currentLocal != null && nowLimit != currentLocal ->
@@ -457,7 +488,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         // Source changes when on-screen set changes or distance labels change
         // by ten metres, not on every camera animation frame.
         val key = displayed.joinToString("|") {
-            "${it.sign.id}:${(it.sign.distanceMeters + 5) / 10}"
+            "${it.sign.id}:${(it.sign.distanceMeters + 5) / 10}:${it.sign.speedLimitKmh}"
         }
         if (key == lastNearbySignsSignature) return
         val source = map.getStyle()?.getSourceAs<GeoJsonSource>(mapSignSourceId) ?: return
@@ -467,7 +498,15 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 sign.position.longitude, sign.position.latitude,
             )).apply {
                 addStringProperty("icon", MapRoadSignIcons.imageId(sign.kind))
-                addStringProperty("label", "${sign.kind.title} · ${sign.distanceMeters} m")
+                addStringProperty("badge",
+                    if (sign.kind == RoadSignKind.SPEED_LIMIT)
+                        sign.speedLimitKmh?.toString() ?: ""
+                    else "")
+                addStringProperty("label",
+                    if (sign.kind == RoadSignKind.SPEED_LIMIT &&
+                        sign.speedLimitKmh != null
+                    ) "Giới hạn ${sign.speedLimitKmh} · ${sign.distanceMeters} m"
+                    else "${sign.kind.title} · ${sign.distanceMeters} m")
             }
         }
         source.featureCollection(FeatureCollection.fromFeatures(features))
