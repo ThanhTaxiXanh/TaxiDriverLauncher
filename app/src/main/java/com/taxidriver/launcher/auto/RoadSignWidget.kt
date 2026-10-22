@@ -88,7 +88,7 @@ internal class RoadSignWidget(night: Boolean) : BitmapWidget(
             p.textSize = 14f
             p.typeface = android.graphics.Typeface.DEFAULT
             p.color = if (night) Color.LTGRAY else Color.GRAY
-            canvas.drawText("Dữ liệu OSM", 108f, 99f, p)
+            canvas.drawText("© OpenStreetMap contributors", 108f, 99f, p)
             return bmp
         }
     }
