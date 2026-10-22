@@ -471,17 +471,25 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         val valid = speedRefreshActive && fix != null &&
             fix.hasAccuracy() && fix.accuracy <= 35f &&
             (now - fix.elapsedRealtimeNanos / 1_000_000L) in 0L..6_000L
-        val nearby = if (valid && fix != null) {
-            val car = RoadCoordinate(fix.latitude, fix.longitude)
-            val sources = if (nationalDatasetUsable &&
+        val car = if (valid && fix != null)
+            RoadCoordinate(fix.latitude, fix.longitude) else null
+        val sourceNodes = if (car != null) {
+            if (nationalDatasetUsable &&
                 lastNationalQueryMillis >= 0L &&
                 now - lastNationalQueryMillis in 0L..8_000L
             ) nationalPins else roadSignRepository.nearbyMapNodes(car)
-            RoadSignPolicy.visibleWithinRadius(car, sources, 500.0)
         } else emptyList()
+        // The 500m count is for nearby-driver reference only.
+        val nearby = if (car != null)
+            RoadSignPolicy.visibleWithinRadius(car, sourceNodes, 500.0)
+        else emptyList()
+        // Farther real OSM signs may still be visible in the tilted map horizon.
+        val mapCandidates = if (car != null)
+            RoadSignPolicy.visibleWithinRadius(car, sourceNodes, 1_800.0)
+        else emptyList()
         val map = attachedSurface?.mapSurface?.getMapboxMap() ?: return
         val size = map.getSize()
-        val projected = nearby.map { sign ->
+        val projected = mapCandidates.map { sign ->
             val p = map.pixelForCoordinate(Point.fromLngLat(
                 sign.position.longitude, sign.position.latitude,
             ))
@@ -491,7 +499,8 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             projected, size.width.toDouble(), size.height.toDouble(),
         )
         val displayed = MapSignPresentation.display(
-            inView, maxItems = 5, preferredId = upcomingWarningId,
+            inView, maxItems = 12, separationPx = 82.0,
+            preferredId = upcomingWarningId,
         )
         if (valid && fix != null) {
             offscreenSignWidget?.update(
