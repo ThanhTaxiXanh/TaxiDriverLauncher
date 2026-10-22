@@ -89,8 +89,24 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private val roadLimitPolicy = SpeedLimitPolicy()
     private var speedWidget: DrivingSpeedWidget? = null
     private var speedLimitWidget: SpeedLimitWidget? = null
+    private var roadSignWidget: RoadSignWidget? = null
+    private var matchedRoadNames: List<String> = emptyList()
+    private var matchedRoadReliable = false
+    private var lastMatchedRoadMillis = -1L
+    private val roadSignRepository by lazy {
+        OsmRoadSignRepository { refreshSignHud() }
+    }
     private val freeDrive by lazy {
-        FreeDriveSpeedLimitController(carContext) { limit, unit, onRoad, reliable ->
+        FreeDriveSpeedLimitController(
+            carContext,
+            onRoadMatch = { names, reliable ->
+                matchedRoadNames = names
+                matchedRoadReliable = reliable
+                lastMatchedRoadMillis = SystemClock.elapsedRealtime()
+                refreshSignHud()
+                maybeRequestSigns()
+            },
+        ) { limit, unit, onRoad, reliable ->
             roadLimitPolicy.onMatchedLimit(
                 limit, unit, onRoad, reliable, SystemClock.elapsedRealtime(),
             )
@@ -149,6 +165,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             val limitWidget = SpeedLimitWidget()
             speedLimitWidget = limitWidget
             mapboxCarMapSurface.mapSurface.addWidget(limitWidget)
+            val signWidget = RoadSignWidget(isNightInVietnam())
+            roadSignWidget = signWidget
+            mapboxCarMapSurface.mapSurface.addWidget(signWidget)
             refreshSpeedHud()
             loadDrivingStyle(mapboxCarMapSurface)
         }
@@ -157,8 +176,10 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             if (attachedSurface === mapboxCarMapSurface) {
                 speedWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 speedLimitWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
+                roadSignWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 speedWidget = null
                 speedLimitWidget = null
+                roadSignWidget = null
                 attachedSurface = null
                 styleReady = false
                 cameraInitialized = false
@@ -232,6 +253,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             refreshSpeedHud()
             updateCamera(location)
             maybeLookupRoad(location)
+            maybeRequestSigns()
         }
     }
 
@@ -248,6 +270,41 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         val warning = roadLimitPolicy.isOverLimit(speed, now)
         speedWidget?.update(speed, isNightInVietnam(), warning)
         speedLimitWidget?.update(limit, warning)
+        refreshSignHud()
+    }
+
+    /** Never guess that a nearby sign applies to this road or direction. */
+    private fun refreshSignHud() {
+        val now = SystemClock.elapsedRealtime()
+        val fix = latestLocation
+        val valid = speedRefreshActive && matchedRoadReliable &&
+            lastMatchedRoadMillis >= 0L &&
+            now - lastMatchedRoadMillis <= 4_000L &&
+            fix != null && fix.hasAccuracy() && fix.accuracy <= 20f &&
+            fix.hasBearing() && fix.speed >= 1.5f &&
+            (now - fix.elapsedRealtimeNanos / 1_000_000L) in 0L..3_500L
+        val result = if (valid && fix != null) {
+            RoadSignPolicy.findAhead(
+                RoadCoordinate(fix.latitude, fix.longitude),
+                lastBearing,
+                matchedRoadNames,
+                true,
+                roadSignRepository.nearby(RoadCoordinate(fix.latitude, fix.longitude)),
+            )
+        } else null
+        roadSignWidget?.update(result, isNightInVietnam())
+    }
+
+    private fun maybeRequestSigns() {
+        val now = SystemClock.elapsedRealtime()
+        val fix = latestLocation ?: return
+        if (!speedRefreshActive || !matchedRoadReliable ||
+            matchedRoadNames.isEmpty() ||
+            lastMatchedRoadMillis < 0L ||
+            now - lastMatchedRoadMillis > 4_000L ||
+            !fix.hasAccuracy() || fix.accuracy > 20f
+        ) return
+        roadSignRepository.maybeFetch(RoadCoordinate(fix.latitude, fix.longitude))
     }
 
     private fun startSpeedRefresh() {
@@ -261,6 +318,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         mainHandler.removeCallbacks(speedRefresh)
         gpsSpeedFilter.reset()
         roadLimitPolicy.clear()
+        matchedRoadNames = emptyList()
+        matchedRoadReliable = false
+        lastMatchedRoadMillis = -1L
         refreshSpeedHud()
     }
 
@@ -503,6 +563,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
 
     override fun onDestroy(owner: LifecycleOwner) {
         freeDrive.stop()
+        roadSignRepository.close()
         stopTracking()
         stopSpeedRefresh()
         mainHandler.removeCallbacks(themeCheck)
