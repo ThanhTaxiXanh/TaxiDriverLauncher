@@ -87,18 +87,22 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var previousFix: Location? = null
     private val gpsSpeedFilter = GpsSpeedFilter()
     private val roadLimitPolicy = SpeedLimitPolicy()
+    private val stoppedRoadLimit = StoppedRoadLimit()
     private var speedWidget: DrivingSpeedWidget? = null
     private var speedLimitWidget: SpeedLimitWidget? = null
     private var roadSignWidget: RoadSignWidget? = null
+    private var diagnosticWidget: VietnamDataDebugWidget? = null
+    private var nationalCacheSource = "CHƯA NẠP"
     private var nationalPins: List<OsmMapSign> = emptyList()
     private var nationalDatasetUsable = false
     private var nationalSpeedLimit: Int? = null
     private var lastNationalQueryMillis = -1L
     private val nationalRoadData by lazy {
-        NationalRoadDataRepository(carContext) { pins, limit, usable ->
+        NationalRoadDataRepository(carContext) { pins, limit, usable, source ->
             nationalPins = pins
             nationalSpeedLimit = limit
             nationalDatasetUsable = usable
+            nationalCacheSource = source
             lastNationalQueryMillis = SystemClock.elapsedRealtime()
             refreshSpeedHud()
         }
@@ -192,6 +196,11 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             val signWidget = RoadSignWidget(isNightInVietnam())
             roadSignWidget = signWidget
             mapboxCarMapSurface.mapSurface.addWidget(signWidget)
+            if (com.taxidriver.launcher.BuildConfig.DEBUG) {
+                diagnosticWidget = VietnamDataDebugWidget().also {
+                    mapboxCarMapSurface.mapSurface.addWidget(it)
+                }
+            }
             refreshSpeedHud()
             loadDrivingStyle(mapboxCarMapSurface)
         }
@@ -201,6 +210,8 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 speedWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 speedLimitWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
                 roadSignWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
+                diagnosticWidget?.let(mapboxCarMapSurface.mapSurface::removeWidget)
+                diagnosticWidget = null
                 speedWidget = null
                 speedLimitWidget = null
                 roadSignWidget = null
@@ -322,11 +333,32 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             lastNationalQueryMillis >= 0L && now - lastNationalQueryMillis in 0L..6_000L &&
                 matchedRoadReliable && now - lastMatchedRoadMillis in 0L..4_000L
         }
+        val conflicting = matchedLimit != null && localLimit != null &&
+            matchedLimit != localLimit
         // Conflicting verified sources mean unknown, not an arbitrary choice.
-        val limit = when {
-            matchedLimit != null && localLimit != null && matchedLimit != localLimit -> null
-            else -> matchedLimit ?: localLimit
+        val instantLimit = if (conflicting) null else matchedLimit ?: localLimit
+        val fix = latestLocation
+        val freshFix = fix != null &&
+            (now - fix.elapsedRealtimeNanos / 1_000_000L) in 0L..3_500L
+        if (conflicting) stoppedRoadLimit.clear()
+        if (freshFix && fix != null && !conflicting &&
+            matchedRoadReliable && now - lastMatchedRoadMillis in 0L..4_000L
+        ) {
+            stoppedRoadLimit.remember(
+                instantLimit, fix.latitude, fix.longitude, matchedRoadNames,
+                reliableRoad = true, moving = speed != null && speed > 3, nowMillis = now,
+            )
         }
+        val heldLimit = if (!conflicting && freshFix && fix != null) {
+            stoppedRoadLimit.atStop(
+                fix.latitude, fix.longitude, speed,
+                if (fix.hasAccuracy()) fix.accuracy else null,
+                matchedRoadNames,
+                matchedRoadReliable && now - lastMatchedRoadMillis in 0L..4_000L,
+                now - fix.elapsedRealtimeNanos / 1_000_000L, now,
+            )
+        } else null
+        val limit = instantLimit ?: heldLimit
         val warning = limit != null && speed != null && speed > limit + 3
         speedWidget?.update(speed, isNightInVietnam(), warning)
         speedLimitWidget?.update(limit, warning)
@@ -374,6 +406,10 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         } else emptyList()
         // Distance label changes only every 10m, avoiding reloading GeoJSON
         // on each 500ms GPS fix.
+        diagnosticWidget?.update(
+            if (nationalDatasetUsable) nationalCacheSource else "CHƯA NẠP",
+            nearby.size,
+        )
         val key = nearby.joinToString("|") {
             "${it.id}:${(it.distanceMeters + 5) / 10}"
         }
@@ -416,6 +452,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         mainHandler.removeCallbacks(speedRefresh)
         gpsSpeedFilter.reset()
         roadLimitPolicy.clear()
+        stoppedRoadLimit.clear()
         matchedRoadNames = emptyList()
         matchedRoadReliable = false
         lastMatchedRoadMillis = -1L
