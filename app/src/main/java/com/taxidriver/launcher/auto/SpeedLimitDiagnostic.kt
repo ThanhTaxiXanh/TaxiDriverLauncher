@@ -11,6 +11,8 @@ internal enum class SpeedLimitDiagnostic(val vietnamese: String) {
     DIRECTION_UNCERTAIN("HƯỚNG CHƯA RÕ"),
     CONFLICT("GIỚI HẠN MÂU THUẪN"),
     VERIFIED("OSM ĐÃ XÁC MINH"),
+    VERIFIED_GEOMETRY("OSM KHỚP GPS"),
+    GEOMETRY_AMBIGUOUS("NHIỀU ĐƯỜNG GẦN"),
 }
 
 internal data class SpeedLimitMatch(
