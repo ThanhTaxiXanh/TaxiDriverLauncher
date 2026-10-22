@@ -42,7 +42,9 @@ jobs:
           name: vietnam-osm-driving-data
           path: |
             /tmp/osm-vn/out/manifest.json
+            /tmp/osm-vn/out/vietnam_speed_limits.json
             /tmp/osm-vn/out/vietnam_speed_limits.json.gz
+            /tmp/osm-vn/out/vietnam_traffic_signs.json
             /tmp/osm-vn/out/vietnam_traffic_signs.json.gz
             /tmp/osm-vn/out/vietnam_road_data.db.gz
           if-no-files-found: error
@@ -59,7 +61,9 @@ jobs:
               --notes "Geofabrik Vietnam OSM extract. Data ODbL © OpenStreetMap contributors. Road limits may be absent, directional, or conditional. Not a replacement for posted signs."
           fi
           gh release upload vietnam-osm-data /tmp/osm-vn/out/manifest.json \
+            /tmp/osm-vn/out/vietnam_speed_limits.json \
             /tmp/osm-vn/out/vietnam_speed_limits.json.gz \
+            /tmp/osm-vn/out/vietnam_traffic_signs.json \
             /tmp/osm-vn/out/vietnam_traffic_signs.json.gz \
             /tmp/osm-vn/out/vietnam_road_data.db.gz \
             --repo "${GITHUB_REPOSITORY}" --clobber
