@@ -49,7 +49,9 @@ jobs:
           assert path.stat().st_size < 300 * 1024 * 1024
           con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
           assert con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-          assert con.execute("SELECT value FROM meta WHERE key='schema'").fetchone()[0] == "1"
+          assert con.execute("SELECT value FROM meta WHERE key='schema'").fetchone()[0] == "2", "Required OSM dataset schema v2; rebuild Geofabrik extract first"
+          signed = con.execute("SELECT COUNT(*) FROM signs WHERE kind='SPEED_LIMIT' AND speed_limit_kmh IS NOT NULL").fetchone()[0]
+          print(f"Explicit OSM numeric sign values: {signed}")
           count_signs = con.execute("SELECT count(*) FROM signs").fetchone()[0]
           count_ways = con.execute("SELECT count(*) FROM speed_segments").fetchone()[0]
           assert count_signs > 0 and count_ways > 0, "Empty OSM dataset"
