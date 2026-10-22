@@ -47,6 +47,7 @@ import com.mapbox.maps.extension.style.sources.generated.geoJsonSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.getSourceAs
 import com.mapbox.maps.extension.style.layers.generated.symbolLayer
+import com.mapbox.maps.extension.style.layers.properties.generated.IconAnchor
 import com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment
 import com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment
 import com.mapbox.maps.extension.style.layers.generated.fillExtrusionLayer
@@ -96,19 +97,23 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var nationalPins: List<OsmMapSign> = emptyList()
     private var nationalDatasetUsable = false
     private var nationalSpeedLimit: Int? = null
+    private var nationalLimitDiagnostic = SpeedLimitDiagnostic.CACHE_PENDING
+    private var upcomingWarningId: Long? = null
     private var lastNationalQueryMillis = -1L
     private val nationalRoadData by lazy {
-        NationalRoadDataRepository(carContext) { pins, limit, usable, source ->
+        NationalRoadDataRepository(carContext) { pins, limit, usable, source, reason ->
             nationalPins = pins
             nationalSpeedLimit = limit
             nationalDatasetUsable = usable
             nationalCacheSource = source
+            nationalLimitDiagnostic = reason
             lastNationalQueryMillis = SystemClock.elapsedRealtime()
             refreshSpeedHud()
         }
     }
     private val mapSignSourceId = "taxi-osm-nearby-signs"
     private val mapSignLayerId = "taxi-osm-nearby-signs-layer"
+    private val mapSignLabelsId = "taxi-osm-nearby-sign-labels"
     private var lastNearbySignsSignature: String? = null
     private var matchedRoadNames: List<String> = emptyList()
     private var matchedRoadReliable = false
@@ -262,18 +267,24 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                     +geoJsonSource(mapSignSourceId) {
                         featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
                     }
+                    // Always paint the *icon* of each prioritized visible OSM node.
+                    // Label collision never suppresses its floating road sign.
                     +symbolLayer(mapSignLayerId, mapSignSourceId) {
                         iconImage(get { literal("icon") })
-                        iconAllowOverlap(false)
-                        iconSize(0.82)
+                        iconAnchor(IconAnchor.BOTTOM)
+                        iconAllowOverlap(true)
+                        iconIgnorePlacement(true)
+                        iconSize(0.78)
                         iconPitchAlignment(IconPitchAlignment.VIEWPORT)
                         iconRotationAlignment(IconRotationAlignment.VIEWPORT)
+                    }
+                    +symbolLayer(mapSignLabelsId, mapSignSourceId) {
                         textField(get { literal("label") })
-                        textSize(12.0)
+                        textSize(14.0)
                         textColor(if (night) "#FFFFFF" else "#152e4b")
                         textHaloColor(if (night) "#182b40" else "#FFFFFF")
-                        textHaloWidth(2.0)
-                        textOffset(listOf(0.0, 2.5))
+                        textHaloWidth(2.8)
+                        textOffset(listOf(5.0, -4.0))
                         textAllowOverlap(false)
                     }
                     // The puck is declared last so it paints over 3D buildings.
@@ -385,10 +396,15 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 roadSignRepository.nearby(RoadCoordinate(fix.latitude, fix.longitude)),
             )
         } else null
+        upcomingWarningId = result?.id
         roadSignWidget?.update(result, isNightInVietnam())
     }
 
-    /** Draw mapped OSM sign nodes within 500m even while the car is stopped. */
+    /**
+     * Real 500m OSM data can be outside a zoom-18 map viewport.
+     * Project each coordinate to screen pixels so the debug count distinguishes
+     * 500m matches from actually in-view pins, then choose at most five signs.
+     */
     private fun refreshNearbyMapSigns() {
         if (!styleReady) return
         val now = SystemClock.elapsedRealtime()
@@ -404,19 +420,49 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             ) nationalPins else roadSignRepository.nearbyMapNodes(car)
             RoadSignPolicy.visibleWithinRadius(car, sources, 500.0)
         } else emptyList()
-        // Distance label changes only every 10m, avoiding reloading GeoJSON
-        // on each 500ms GPS fix.
+        val map = attachedSurface?.mapSurface?.getMapboxMap() ?: return
+        val size = map.getSize()
+        val projected = nearby.map { sign ->
+            val p = map.pixelForCoordinate(Point.fromLngLat(
+                sign.position.longitude, sign.position.latitude,
+            ))
+            ProjectedMapSign(sign, p.x, p.y)
+        }
+        val inView = MapSignPresentation.inView(
+            projected, size.width.toDouble(), size.height.toDouble(),
+        )
+        val displayed = MapSignPresentation.display(
+            inView, maxItems = 5, preferredId = upcomingWarningId,
+        )
+        val nowLimit = roadLimitPolicy.limitAt(now)
+        val currentLocal = nationalSpeedLimit?.takeIf {
+            lastNationalQueryMillis >= 0L &&
+                now - lastNationalQueryMillis in 0L..6_000L &&
+                matchedRoadReliable && now - lastMatchedRoadMillis in 0L..4_000L
+        }
+        val diagnostic = when {
+            nowLimit != null && currentLocal != null && nowLimit != currentLocal ->
+                SpeedLimitDiagnostic.CONFLICT.vietnamese
+            nowLimit != null -> "MAPBOX: ${nowLimit} km/h"
+            currentLocal != null -> "OSM: ${currentLocal} km/h"
+            !nationalDatasetUsable -> SpeedLimitDiagnostic.CACHE_PENDING.vietnamese
+            lastNationalQueryMillis < 0L || now - lastNationalQueryMillis > 8_000L ->
+                "ĐANG KIỂM TRA"
+            else -> nationalLimitDiagnostic.vietnamese
+        }
         diagnosticWidget?.update(
             if (nationalDatasetUsable) nationalCacheSource else "CHƯA NẠP",
-            nearby.size,
+            nearby.size, inView.size, diagnostic,
         )
-        val key = nearby.joinToString("|") {
-            "${it.id}:${(it.distanceMeters + 5) / 10}"
+        // Source changes when on-screen set changes or distance labels change
+        // by ten metres, not on every camera animation frame.
+        val key = displayed.joinToString("|") {
+            "${it.sign.id}:${(it.sign.distanceMeters + 5) / 10}"
         }
         if (key == lastNearbySignsSignature) return
-        val map = attachedSurface?.mapSurface?.getMapboxMap() ?: return
         val source = map.getStyle()?.getSourceAs<GeoJsonSource>(mapSignSourceId) ?: return
-        val features = nearby.map { sign ->
+        val features = displayed.map { projectedSign ->
+            val sign = projectedSign.sign
             Feature.fromGeometry(Point.fromLngLat(
                 sign.position.longitude, sign.position.latitude,
             )).apply {
@@ -458,6 +504,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         lastMatchedRoadMillis = -1L
         nationalPins = emptyList()
         nationalSpeedLimit = null
+        nationalLimitDiagnostic = SpeedLimitDiagnostic.CACHE_PENDING
         lastNationalQueryMillis = -1L
         refreshSpeedHud()
     }
