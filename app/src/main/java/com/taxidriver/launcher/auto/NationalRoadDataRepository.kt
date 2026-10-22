@@ -30,6 +30,7 @@ import kotlin.math.roundToInt
 internal class NationalRoadDataRepository(
     context: Context,
     private val onUpdate: (pins: List<OsmMapSign>, limitKmh: Int?, usable: Boolean, source: String, reason: SpeedLimitDiagnostic) -> Unit,
+    private val onRoadSpeedVisuals: (List<TaggedRoadSpeed>) -> Unit = {},
 ) {
     private val executor = Executors.newSingleThreadExecutor()
     private val downloader = Executors.newSingleThreadExecutor()
@@ -287,12 +288,66 @@ internal class NationalRoadDataRepository(
                 }
             }
             val result = findSpeedLimit(db, q)
+            val roads = nearbyTaggedRoads(db, q)
             handler.post {
-                if (!closed) onUpdate(pins, result.limitKmh, true, cacheSource, result.reason)
+                if (!closed) {
+                    onUpdate(pins, result.limitKmh, true, cacheSource, result.reason)
+                    onRoadSpeedVisuals(roads)
+                }
             }
         } catch (e: Exception) {
             Log.w("TaxiDriverAuto", "Vietnam road query failed", e)
         }
+    }
+
+    /**
+     * This is separate from the driver's current speed limit.
+     * It displays only OSM highway ways with an unambiguous explicit
+     * speed for both travel directions, without assigning it to the car.
+     */
+    private fun nearbyTaggedRoads(
+        db: SQLiteDatabase,
+        q: Query,
+    ): List<TaggedRoadSpeed> {
+        val latSpan = 650.0 / 111_320.0
+        val lonSpan = latSpan / cos(Math.toRadians(q.lat)).coerceAtLeast(0.2)
+        val candidates = mutableListOf<TaggedRoadSpeed>()
+        db.rawQuery(
+            "SELECT way_id,name,maxspeed_kmh,forward_kmh,backward_kmh,geometry " +
+                "FROM speed_segments WHERE minlat<=? AND maxlat>=? " +
+                "AND minlon<=? AND maxlon>=? LIMIT 400",
+            arrayOf(
+                (q.lat + latSpan).toString(), (q.lat - latSpan).toString(),
+                (q.lon + lonSpan).toString(), (q.lon - lonSpan).toString(),
+            ),
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val limit = TaggedRoadSpeedPolicy.commonLimit(
+                    cursor.getNullableInt(2),
+                    cursor.getNullableInt(3),
+                    cursor.getNullableInt(4),
+                ) ?: continue
+                val rawGeometry = JSONArray(cursor.getString(5))
+                if (rawGeometry.length() !in 2..900) continue
+                val points = (0 until rawGeometry.length()).mapNotNull { index ->
+                    val coords = rawGeometry.optJSONArray(index) ?: return@mapNotNull null
+                    val lat = coords.optDouble(0)
+                    val lon = coords.optDouble(1)
+                    if (!lat.isFinite() || !lon.isFinite()) null else RoadCoordinate(lat, lon)
+                }
+                if (points.size < 2) continue
+                candidates.add(TaggedRoadSpeed(
+                    wayId = cursor.getLong(0),
+                    name = cursor.getString(1) ?: "",
+                    limitKmh = limit,
+                    coordinate = points.first(),
+                    geometry = points,
+                ))
+            }
+        }
+        return TaggedRoadSpeedPolicy.bounded(
+            RoadCoordinate(q.lat, q.lon), candidates, 650.0, 65,
+        )
     }
 
     /** First find all tagged OSM ways spatially; pure logic verifies bearing,
