@@ -29,6 +29,33 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
+      - name: Bundle verified Vietnam OSM SQLite into debug APK
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets
+          curl --fail --location --retry 3 --connect-timeout 20 --max-time 180 \
+            "https://github.com/ThanhTaxiXanh/TaxiDriverLauncher/releases/download/vietnam-osm-data/vietnam_road_data.db.gz" \
+            --output app/src/main/assets/vietnam_road_data.db.gz
+          python3 - <<'PY'
+          import gzip
+          import shutil
+          import sqlite3
+          from pathlib import Path
+
+          compressed = Path("app/src/main/assets/vietnam_road_data.db.gz")
+          path = Path("/tmp/vietnam_road_data_verified.db")
+          with gzip.open(compressed, "rb") as source, path.open("wb") as target:
+              shutil.copyfileobj(source, target)
+          assert path.stat().st_size < 300 * 1024 * 1024
+          con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+          assert con.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+          assert con.execute("SELECT value FROM meta WHERE key='schema'").fetchone()[0] == "1"
+          count_signs = con.execute("SELECT count(*) FROM signs").fetchone()[0]
+          count_ways = con.execute("SELECT count(*) FROM speed_segments").fetchone()[0]
+          assert count_signs > 0 and count_ways > 0, "Empty OSM dataset"
+          print(f"Bundled Vietnam OSM: {count_signs} mapped signs, {count_ways} speed segments")
+          con.close()
+          PY
       - name: Build Android Auto debug APK
         env:
           MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
@@ -37,6 +64,17 @@ jobs:
           test -n "$MAPBOX_ACCESS_TOKEN" || { echo "::error::Missing MAPBOX_ACCESS_TOKEN"; exit 1; }
           test -n "$MAPBOX_DOWNLOADS_TOKEN" || { echo "::error::Missing MAPBOX_DOWNLOADS_TOKEN"; exit 1; }
           ./gradlew :app:testStableDebugUnitTest :app:assembleStableDebug --stacktrace
+      - name: Verify APK contains offline OSM database
+        run: |
+          python3 - <<'PY'
+          import glob
+          import zipfile
+          path = glob.glob("app/build/outputs/apk/stable/debug/*.apk")
+          assert len(path) == 1, path
+          with zipfile.ZipFile(path[0]) as apk:
+              assert "assets/vietnam_road_data.db.gz" in apk.namelist()
+              print("Verified OSM asset in APK")
+          PY
       - uses: actions/upload-artifact@v4
         if: success()
         with:
