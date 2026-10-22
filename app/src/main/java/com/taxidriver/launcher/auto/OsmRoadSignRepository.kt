@@ -32,16 +32,23 @@ internal class OsmRoadSignRepository(
     private var request: Call? = null
     private var center: RoadCoordinate? = null
     private var signs: List<RoadSign> = emptyList()
+    private var mapNodes: List<OsmMapSign> = emptyList()
     private var lastRequestMs = -1_000_000L
     private var lastSuccessMs = -1_000_000L
     private var closed = false
 
-    fun nearby(position: RoadCoordinate): List<RoadSign> {
-        val c = center ?: return emptyList()
-        return if (SystemClock.elapsedRealtime() - lastSuccessMs < 600_000L &&
-            distanceMeters(c, position) <= 360.0
-        ) signs else emptyList()
+    private fun cacheValid(position: RoadCoordinate): Boolean {
+        val c = center ?: return false
+        val age = SystemClock.elapsedRealtime() - lastSuccessMs
+        // Query radius 650m covers 500m around the car while it moves <=130m.
+        return age in 0L..600_000L && distanceMeters(c, position) <= 130.0
     }
+
+    fun nearby(position: RoadCoordinate): List<RoadSign> =
+        if (cacheValid(position)) signs else emptyList()
+
+    fun nearbyMapNodes(position: RoadCoordinate): List<OsmMapSign> =
+        if (cacheValid(position)) mapNodes else emptyList()
 
     fun maybeFetch(position: RoadCoordinate) {
         if (closed || request != null ||
@@ -51,13 +58,9 @@ internal class OsmRoadSignRepository(
         val now = SystemClock.elapsedRealtime()
         // No more than one network query per minute, even after a failed call.
         if (now - lastRequestMs < 60_000L) return
-        if (nearby(position).isNotEmpty() && center?.let {
-                distanceMeters(it, position) < 200.0
-            } == true
-        ) return
         // Cache an empty successful result, too: absence of OSM signs is normal.
         if (now - lastSuccessMs < 480_000L &&
-            center?.let { distanceMeters(it, position) < 200.0 } == true
+            center?.let { distanceMeters(it, position) < 95.0 } == true
         ) return
 
         lastRequestMs = now
@@ -65,7 +68,7 @@ internal class OsmRoadSignRepository(
         val body = FormBody.Builder().add("data", query).build()
         val req = Request.Builder()
             .url("https://overpass-api.de/api/interpreter")
-            .header("User-Agent", "TaxiDriverLauncher/3.0.3 (+https://github.com/ThanhTaxiXanh/TaxiDriverLauncher)")
+            .header("User-Agent", "TaxiDriverLauncher/3.0.4 (+https://github.com/ThanhTaxiXanh/TaxiDriverLauncher)")
             .post(body)
             .build()
         val call = client.newCall(req)
@@ -96,7 +99,8 @@ internal class OsmRoadSignRepository(
                     request = null
                     if (parsed != null) {
                         center = position
-                        signs = parsed
+                        signs = parsed.directional
+                        mapNodes = parsed.visibleNodes
                         lastSuccessMs = SystemClock.elapsedRealtime()
                         onUpdate()
                     }
@@ -110,10 +114,11 @@ internal class OsmRoadSignRepository(
         request?.cancel()
         request = null
         signs = emptyList()
+        mapNodes = emptyList()
     }
 
     private fun buildQuery(position: RoadCoordinate): String {
-        val at = "550," + position.latitude + "," + position.longitude
+        val at = "650," + position.latitude + "," + position.longitude
         // Only nodes explicitly mapped as traffic signs/road hazards.
         // Include parent highway ways to associate signs with a road and its
         // geometry; separate signs without verifiable way membership are ignored.
@@ -124,51 +129,71 @@ internal class OsmRoadSignRepository(
             ")->.signs;(.signs;way(bn.signs)[highway];);out body geom;"
     }
 
-    private fun parse(json: JSONObject): List<RoadSign> {
-        val elements = json.optJSONArray("elements") ?: return emptyList()
-        val nodes = mutableMapOf<Long, Pair<RoadCoordinate, Pair<RoadSignKind, String>>>()
+    private data class ParsedSigns(
+        val directional: List<RoadSign>,
+        val visibleNodes: List<OsmMapSign>,
+    )
+
+    private fun parse(json: JSONObject): ParsedSigns {
+        val elements = json.optJSONArray("elements")
+            ?: return ParsedSigns(emptyList(), emptyList())
+        val directionalNodes =
+            mutableMapOf<Long, Pair<RoadCoordinate, Pair<RoadSignKind, String>>>()
+        val allNodes = mutableListOf<OsmMapSign>()
         for (i in 0 until elements.length().coerceAtMost(1800)) {
             val item = elements.optJSONObject(i) ?: continue
             if (item.optString("type") != "node") continue
             val tags = item.optJSONObject("tags") ?: continue
             val kind = identify(tags) ?: continue
+            val id = item.optLong("id")
+            val lat = item.optDouble("lat")
+            val lon = item.optDouble("lon")
+            if (id <= 0L || !lat.isFinite() || !lon.isFinite() ||
+                lat !in -90.0..90.0 || lon !in -180.0..180.0
+            ) continue
+            val position = RoadCoordinate(lat, lon)
+            // Map pins need a documented sign type and actual OSM coordinates,
+            // but do not require travel direction or membership in a way.
+            allNodes.add(OsmMapSign(id, kind, position))
             val direction = tags.optString("traffic_sign:direction")
                 .ifBlank { tags.optString("direction") }
-            // Relative orientation only. Compass bearings on freestanding signs
-            // use different OSM semantics and are deliberately excluded.
-            if (direction != "forward" && direction != "backward") continue
-            nodes[item.optLong("id")] = RoadCoordinate(
-                item.optDouble("lat"), item.optDouble("lon"),
-            ) to (kind to direction)
-        }
-        if (nodes.isEmpty()) return emptyList()
-
-        val results = mutableListOf<RoadSign>()
-        for (i in 0 until elements.length().coerceAtMost(1800)) {
-            val item = elements.optJSONObject(i) ?: continue
-            if (item.optString("type") != "way") continue
-            val tags = item.optJSONObject("tags") ?: continue
-            val roadName = tags.optString("name:vi").ifBlank { tags.optString("name") }
-            if (roadName.isBlank()) continue
-            val ids = item.optJSONArray("nodes") ?: continue
-            val coords = item.optJSONArray("geometry") ?: continue
-            if (ids.length() != coords.length() || ids.length() > 900) continue
-            val nodeIds = (0 until ids.length()).map { ids.optLong(it) }
-            val geometry = (0 until coords.length()).mapNotNull { index ->
-                val p = coords.optJSONObject(index) ?: return@mapNotNull null
-                RoadCoordinate(p.optDouble("lat"), p.optDouble("lon"))
-            }
-            if (geometry.size != nodeIds.size) continue
-            for (nodeId in nodeIds) {
-                val candidate = nodes[nodeId] ?: continue
-                results.add(
-                    RoadSign(nodeId, candidate.second.first, candidate.first,
-                        roadName, geometry, nodeIds, candidate.second.second),
-                )
-                if (results.size >= 120) return results
+            // Driving warnings still require explicit relative direction and
+            // association with a named road. No nearby-road guesses.
+            if (direction == "forward" || direction == "backward") {
+                directionalNodes[id] = position to (kind to direction)
             }
         }
-        return results
+        val roadSigns = mutableListOf<RoadSign>()
+        if (directionalNodes.isNotEmpty()) {
+            for (i in 0 until elements.length().coerceAtMost(1800)) {
+                val item = elements.optJSONObject(i) ?: continue
+                if (item.optString("type") != "way") continue
+                val tags = item.optJSONObject("tags") ?: continue
+                val roadName = tags.optString("name:vi").ifBlank { tags.optString("name") }
+                if (roadName.isBlank()) continue
+                val ids = item.optJSONArray("nodes") ?: continue
+                val coords = item.optJSONArray("geometry") ?: continue
+                if (ids.length() != coords.length() || ids.length() > 900) continue
+                val nodeIds = (0 until ids.length()).map { ids.optLong(it) }
+                val geometry = (0 until coords.length()).mapNotNull { index ->
+                    val p = coords.optJSONObject(index) ?: return@mapNotNull null
+                    RoadCoordinate(p.optDouble("lat"), p.optDouble("lon"))
+                }
+                if (geometry.size != nodeIds.size ||
+                    geometry.any { !it.latitude.isFinite() || !it.longitude.isFinite() }
+                ) continue
+                for (nodeId in nodeIds) {
+                    val candidate = directionalNodes[nodeId] ?: continue
+                    roadSigns.add(
+                        RoadSign(nodeId, candidate.second.first, candidate.first,
+                            roadName, geometry, nodeIds, candidate.second.second),
+                    )
+                    if (roadSigns.size >= 120) break
+                }
+                if (roadSigns.size >= 120) break
+            }
+        }
+        return ParsedSigns(roadSigns, allNodes.distinctBy { it.id }.take(350))
     }
 
     private fun identify(tags: JSONObject): RoadSignKind? {

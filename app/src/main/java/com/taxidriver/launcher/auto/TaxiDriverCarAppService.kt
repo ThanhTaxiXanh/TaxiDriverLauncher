@@ -90,11 +90,17 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var speedWidget: DrivingSpeedWidget? = null
     private var speedLimitWidget: SpeedLimitWidget? = null
     private var roadSignWidget: RoadSignWidget? = null
+    private val mapSignSourceId = "taxi-osm-nearby-signs"
+    private val mapSignLayerId = "taxi-osm-nearby-signs-layer"
+    private var lastNearbySignsSignature: String? = null
     private var matchedRoadNames: List<String> = emptyList()
     private var matchedRoadReliable = false
     private var lastMatchedRoadMillis = -1L
     private val roadSignRepository by lazy {
-        OsmRoadSignRepository { refreshSignHud() }
+        OsmRoadSignRepository {
+            refreshSignHud()
+            refreshNearbyMapSigns()
+        }
     }
     private val freeDrive by lazy {
         FreeDriveSpeedLimitController(
@@ -193,9 +199,13 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         activeNightMode = night
         styleReady = false
         cameraInitialized = false
+        lastNearbySignsSignature = null
         surface.mapSurface.getMapboxMap().loadStyle(
             style(if (night) Style.DARK else Style.MAPBOX_STREETS) {
                 +image(markerId, markerBitmap)
+                for (kind in RoadSignKind.entries) {
+                    +image(MapRoadSignIcons.imageId(kind), MapRoadSignIcons.create(kind))
+                }
                     // An empty source prevents a phantom marker at the equator.
                     +geoJsonSource(sourceId) {
                         featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
@@ -220,6 +230,23 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                         textOffset(listOf(0.0, 4.0))
                         textAllowOverlap(true)
                     }
+                    +geoJsonSource(mapSignSourceId) {
+                        featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+                    }
+                    +symbolLayer(mapSignLayerId, mapSignSourceId) {
+                        iconImage(get { literal("icon") })
+                        iconAllowOverlap(false)
+                        iconSize(0.82)
+                        iconPitchAlignment(IconPitchAlignment.VIEWPORT)
+                        iconRotationAlignment(IconRotationAlignment.VIEWPORT)
+                        textField(get { literal("label") })
+                        textSize(12.0)
+                        textColor(if (night) "#FFFFFF" else "#152e4b")
+                        textHaloColor(if (night) "#182b40" else "#FFFFFF")
+                        textHaloWidth(2.0)
+                        textOffset(listOf(0.0, 2.5))
+                        textAllowOverlap(false)
+                    }
                     // The puck is declared last so it paints over 3D buildings.
                     +symbolLayer(layerId, sourceId) {
                         iconImage(markerId)
@@ -235,6 +262,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 Log.i("TaxiDriverAuto", "Mapbox style ready: night=$night")
                 latestLocation?.let(::updateCamera)
                 updateRoadLabel()
+                refreshNearbyMapSigns()
             }
         }
     }
@@ -271,6 +299,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         speedWidget?.update(speed, isNightInVietnam(), warning)
         speedLimitWidget?.update(limit, warning)
         refreshSignHud()
+        refreshNearbyMapSigns()
     }
 
     /** Never guess that a nearby sign applies to this road or direction. */
@@ -295,14 +324,47 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         roadSignWidget?.update(result, isNightInVietnam())
     }
 
+    /** Draw mapped OSM sign nodes within 500m even while the car is stopped. */
+    private fun refreshNearbyMapSigns() {
+        if (!styleReady) return
+        val now = SystemClock.elapsedRealtime()
+        val fix = latestLocation
+        val valid = speedRefreshActive && fix != null &&
+            fix.hasAccuracy() && fix.accuracy <= 35f &&
+            (now - fix.elapsedRealtimeNanos / 1_000_000L) in 0L..6_000L
+        val nearby = if (valid && fix != null) {
+            val car = RoadCoordinate(fix.latitude, fix.longitude)
+            RoadSignPolicy.visibleWithinRadius(
+                car, roadSignRepository.nearbyMapNodes(car), 500.0,
+            )
+        } else emptyList()
+        // Distance label changes only every 10m, avoiding reloading GeoJSON
+        // on each 500ms GPS fix.
+        val key = nearby.joinToString("|") {
+            "${it.id}:${(it.distanceMeters + 5) / 10}"
+        }
+        if (key == lastNearbySignsSignature) return
+        val map = attachedSurface?.mapSurface?.getMapboxMap() ?: return
+        val source = map.getStyle()?.getSourceAs<GeoJsonSource>(mapSignSourceId) ?: return
+        val features = nearby.map { sign ->
+            Feature.fromGeometry(Point.fromLngLat(
+                sign.position.longitude, sign.position.latitude,
+            )).apply {
+                addStringProperty("icon", MapRoadSignIcons.imageId(sign.kind))
+                addStringProperty("label", "${sign.kind.title} · ${sign.distanceMeters} m")
+            }
+        }
+        source.featureCollection(FeatureCollection.fromFeatures(features))
+        lastNearbySignsSignature = key
+    }
+
     private fun maybeRequestSigns() {
         val now = SystemClock.elapsedRealtime()
         val fix = latestLocation ?: return
-        if (!speedRefreshActive || !matchedRoadReliable ||
-            matchedRoadNames.isEmpty() ||
-            lastMatchedRoadMillis < 0L ||
-            now - lastMatchedRoadMillis > 4_000L ||
-            !fix.hasAccuracy() || fix.accuracy > 20f
+        // Fetch nearby signs regardless of road match, heading or speed.
+        // An accepted recent and reasonably accurate position is required.
+        if (!speedRefreshActive || !fix.hasAccuracy() || fix.accuracy > 35f ||
+            (now - fix.elapsedRealtimeNanos / 1_000_000L) !in 0L..6_000L
         ) return
         roadSignRepository.maybeFetch(RoadCoordinate(fix.latitude, fix.longitude))
     }

@@ -29,6 +29,20 @@ internal data class RoadSign(
     val direction: String,
 )
 
+/** A verifiable OSM node shown on the map, not necessarily a driving warning. */
+internal data class OsmMapSign(
+    val id: Long,
+    val kind: RoadSignKind,
+    val position: RoadCoordinate,
+)
+
+internal data class NearbyMapSign(
+    val id: Long,
+    val kind: RoadSignKind,
+    val position: RoadCoordinate,
+    val distanceMeters: Int,
+)
+
 internal data class UpcomingRoadSign(
     val id: Long,
     val kind: RoadSignKind,
@@ -42,6 +56,31 @@ internal data class UpcomingRoadSign(
  */
 internal object RoadSignPolicy {
     private const val EARTH_METERS_PER_DEGREE = 111_320.0
+
+    /** Radius, not distance ahead. Works at zero speed and for other roads. */
+    fun visibleWithinRadius(
+        car: RoadCoordinate,
+        candidates: List<OsmMapSign>,
+        radiusMeters: Double = 500.0,
+    ): List<NearbyMapSign> {
+        if (!car.latitude.isFinite() || !car.longitude.isFinite() ||
+            car.latitude !in -90.0..90.0 || car.longitude !in -180.0..180.0 ||
+            !radiusMeters.isFinite() || radiusMeters <= 0.0
+        ) return emptyList()
+
+        return candidates.mapNotNull { sign ->
+            val p = sign.position
+            if (!p.latitude.isFinite() || !p.longitude.isFinite() ||
+                p.latitude !in -90.0..90.0 || p.longitude !in -180.0..180.0
+            ) return@mapNotNull null
+            val meanLat = Math.toRadians((car.latitude + p.latitude) / 2.0)
+            val dx = (p.longitude - car.longitude) * EARTH_METERS_PER_DEGREE * cos(meanLat)
+            val dy = (p.latitude - car.latitude) * EARTH_METERS_PER_DEGREE
+            val distance = hypot(dx, dy)
+            if (distance > radiusMeters) return@mapNotNull null
+            NearbyMapSign(sign.id, sign.kind, p, distance.toInt())
+        }.sortedBy { it.distanceMeters }.distinctBy { it.id }
+    }
 
     fun findAhead(
         car: RoadCoordinate,

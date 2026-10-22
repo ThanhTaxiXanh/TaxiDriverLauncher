@@ -75,4 +75,36 @@ class RoadSignPolicyTest {
         )
         assertNull(find(signs = listOf(farther)))
     }
+    @Test fun mappedSignWithin500MetersDoesNotNeedHeadingOrRoadMatch() {
+        val node = OsmMapSign(99L, RoadSignKind.STOP, coordinates[4])
+        val visible = RoadSignPolicy.visibleWithinRadius(car, listOf(node))
+        assertEquals(1, visible.size)
+        assertEquals(99L, visible.first().id)
+        assertEquals(true, visible.first().distanceMeters in 240..280)
+    }
+
+    @Test fun mappedSignBeyond500MetersOrInvalidCoordinateIsExcluded() {
+        val far = OsmMapSign(99L, RoadSignKind.STOP, coordinates[9.coerceAtMost(5)].copy(
+            longitude = 105.01,
+        ))
+        val invalid = OsmMapSign(100L, RoadSignKind.STOP, RoadCoordinate(Double.NaN, 105.0))
+        assertEquals(0, RoadSignPolicy.visibleWithinRadius(car, listOf(far, invalid)).size)
+    }
+
+    @Test fun pinsUseUniqueOsmIdsAndNearestFirst() {
+        val nodes = listOf(
+            OsmMapSign(42L, RoadSignKind.STOP, coordinates[4]),
+            OsmMapSign(41L, RoadSignKind.RAILWAY, coordinates[2]),
+            OsmMapSign(42L, RoadSignKind.STOP, coordinates[4]),
+        )
+        val visible = RoadSignPolicy.visibleWithinRadius(car, nodes)
+        assertEquals(listOf(41L, 42L), visible.map { it.id })
+    }
+
+    @Test fun malformedRadiusHasNoPins() {
+        val node = OsmMapSign(5L, RoadSignKind.GIVE_WAY, car)
+        assertEquals(0, RoadSignPolicy.visibleWithinRadius(car, listOf(node), -1.0).size)
+        assertEquals(0, RoadSignPolicy.visibleWithinRadius(car, listOf(node), Double.NaN).size)
+    }
+
 }
