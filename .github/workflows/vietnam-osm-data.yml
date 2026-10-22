@@ -1,0 +1,65 @@
+name: Vietnam OSM driving data
+on:
+  push:
+    branches: [feature/android-auto-conversion]
+    paths:
+      - '.github/workflows/vietnam-osm-data.yml'
+      - '.github/scripts/build-vietnam-osm.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install OSM extract dependency
+        run: python -m pip install --disable-pip-version-check "osmium==4.3.0"
+      - name: Download source Vietnam PBF from Geofabrik
+        run: |
+          mkdir -p /tmp/osm-vn
+          curl --fail --location --retry 3 --connect-timeout 30 \
+            --output /tmp/osm-vn/vietnam.osm.pbf \
+            https://download.geofabrik.de/asia/vietnam-latest.osm.pbf
+          test "$(stat -c%s /tmp/osm-vn/vietnam.osm.pbf)" -gt 50000000
+      - name: Generate two real JSON exports and indexed SQLite cache
+        run: |
+          python .github/scripts/build-vietnam-osm.py /tmp/osm-vn/vietnam.osm.pbf \
+            --output /tmp/osm-vn/out
+          cat /tmp/osm-vn/out/manifest.json
+          test -s /tmp/osm-vn/out/vietnam_speed_limits.json
+          test -s /tmp/osm-vn/out/vietnam_traffic_signs.json
+          test -s /tmp/osm-vn/out/vietnam_road_data.db.gz
+      - name: Upload dataset artifact (JSON and SQLite)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vietnam-osm-driving-data
+          path: |
+            /tmp/osm-vn/out/manifest.json
+            /tmp/osm-vn/out/vietnam_speed_limits.json.gz
+            /tmp/osm-vn/out/vietnam_traffic_signs.json.gz
+            /tmp/osm-vn/out/vietnam_road_data.db.gz
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish stable public dataset URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view vietnam-osm-data --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create vietnam-osm-data \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target feature/android-auto-conversion \
+              --title "Vietnam OSM driving data" \
+              --notes "Geofabrik Vietnam OSM extract. Data ODbL © OpenStreetMap contributors. Road limits may be absent, directional, or conditional. Not a replacement for posted signs."
+          fi
+          gh release upload vietnam-osm-data /tmp/osm-vn/out/manifest.json \
+            /tmp/osm-vn/out/vietnam_speed_limits.json.gz \
+            /tmp/osm-vn/out/vietnam_traffic_signs.json.gz \
+            /tmp/osm-vn/out/vietnam_road_data.db.gz \
+            --repo "${GITHUB_REPOSITORY}" --clobber
