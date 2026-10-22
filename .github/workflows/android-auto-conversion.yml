@@ -72,8 +72,13 @@ jobs:
           path = glob.glob("app/build/outputs/apk/stable/debug/*.apk")
           assert len(path) == 1, path
           with zipfile.ZipFile(path[0]) as apk:
-              assert "assets/vietnam_road_data.db.gz" in apk.namelist()
-              print("Verified OSM asset in APK")
+              names = apk.namelist()
+              candidates = [name for name in names if "vietnam_road_data" in name]
+              print("Matching APK entries:", candidates)
+              print("Sample assets:", [name for name in names if name.startswith("assets/")][:18])
+              assert "assets/vietnam_road_data.db.gz" in names, "OSM SQLite was omitted from the APK"
+              assert apk.getinfo("assets/vietnam_road_data.db.gz").file_size > 500000, "Empty OSM asset"
+              print("Verified bundled Vietnam OSM asset in APK")
           PY
       - uses: actions/upload-artifact@v4
         if: success()
