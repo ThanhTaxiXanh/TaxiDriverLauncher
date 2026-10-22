@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/vietnam-osm-data.yml'
       - '.github/scripts/build-vietnam-osm.py'
+      - '.github/scripts/test-vietnam-osm.py'
   workflow_dispatch:
 
 permissions:
