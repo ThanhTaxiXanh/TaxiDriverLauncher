@@ -31,11 +31,13 @@ internal object MapSignPresentation {
         visible: List<ProjectedMapSign>,
         maxItems: Int = 5,
         separationPx: Double = 100.0,
+        preferredId: Long? = null,
     ): List<ProjectedMapSign> {
         if (maxItems <= 0) return emptyList()
         val chosen = mutableListOf<ProjectedMapSign>()
         for (candidate in visible.sortedWith(
-            compareBy<ProjectedMapSign> { it.sign.distanceMeters }.thenBy { it.sign.id },
+            compareBy<ProjectedMapSign> { it.sign.id != preferredId }
+                .thenBy { it.sign.distanceMeters }.thenBy { it.sign.id },
         )) {
             if (chosen.any { hypot(it.x - candidate.x, it.y - candidate.y) < separationPx }) {
                 continue
