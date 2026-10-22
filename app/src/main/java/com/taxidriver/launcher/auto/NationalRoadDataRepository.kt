@@ -262,7 +262,9 @@ internal class NationalRoadDataRepository(
 
     private fun lookup(q: Query) {
         val db = sqlite ?: return
-        val latSpan = 550.0 / 111_320.0
+        // A tilted 3D screen sees well beyond the 500m driver-warning radius.
+        // Fetch real OSM sign coordinates up to ~1.8km for the map only.
+        val latSpan = 1_800.0 / 111_320.0
         val lonSpan = latSpan / cos(Math.toRadians(q.lat)).coerceAtLeast(0.2)
         val pins = mutableListOf<OsmMapSign>()
         val args = arrayOf(
