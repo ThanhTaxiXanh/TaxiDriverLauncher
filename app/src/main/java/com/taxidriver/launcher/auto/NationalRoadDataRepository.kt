@@ -311,7 +311,9 @@ internal class NationalRoadDataRepository(
         db: SQLiteDatabase,
         q: Query,
     ): List<TaggedRoadSpeed> {
-        val latSpan = 650.0 / 111_320.0
+        // Tagged roads visible toward the upper horizon of a 60-degree map.
+        // This wider radius affects ONLY map annotation, never the car limit.
+        val latSpan = 1_800.0 / 111_320.0
         val lonSpan = latSpan / cos(Math.toRadians(q.lat)).coerceAtLeast(0.2)
         val candidates = mutableListOf<TaggedRoadSpeed>()
         db.rawQuery(
@@ -348,7 +350,7 @@ internal class NationalRoadDataRepository(
             }
         }
         return TaggedRoadSpeedPolicy.bounded(
-            RoadCoordinate(q.lat, q.lon), candidates, 650.0, 65,
+            RoadCoordinate(q.lat, q.lon), candidates, 1_800.0, 65,
         )
     }
 
