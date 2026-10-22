@@ -38,7 +38,20 @@ def tagged_limit(text):
     return speed if 5 <= speed <= 200 else None
 
 
+def explicit_sign_speed(tags):
+    """Only numeric signed speed limits explicitly tagged on a sign node."""
+    code = tags.get("traffic_sign", "").lower()
+    if not code or not any(marker in code for marker in (
+        "maxspeed", "speed_limit", "speed-limit", "p.127",
+    )):
+        return None
+    # A country-code identifier by itself never supplies a numeric limit.
+    return tagged_limit(tags.get("traffic_sign:maxspeed") or tags.get("maxspeed"))
+
+
 def classified_sign(tags):
+    if explicit_sign_speed(tags) is not None:
+        return "SPEED_LIMIT"
     code = tags.get("traffic_sign", "")
     if tags.get("highway") == "stop":
         return "STOP"
@@ -73,7 +86,8 @@ def start_database(path):
         CREATE TABLE signs (
           id INTEGER PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL,
           kind TEXT NOT NULL, osm_code TEXT NOT NULL, direction TEXT,
-          road_name TEXT, road_heading REAL, road_way_id INTEGER
+          road_name TEXT, road_heading REAL, road_way_id INTEGER,
+          speed_limit_kmh INTEGER
         );
         CREATE INDEX signs_coord ON signs(lat, lon);
         CREATE TABLE speed_segments (
@@ -106,9 +120,10 @@ class Signs(osmium.SimpleHandler):
         if not valid_point(lat, lon):
             return
         self.con.execute(
-            "INSERT OR REPLACE INTO signs (id,lat,lon,kind,osm_code,direction) VALUES (?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO signs (id,lat,lon,kind,osm_code,direction,speed_limit_kmh) VALUES (?,?,?,?,?,?,?)",
             (node.id, lat, lon, kind, tags.get("traffic_sign", ""),
-             tags.get("traffic_sign:direction") or tags.get("direction")),
+             tags.get("traffic_sign:direction") or tags.get("direction"),
+             explicit_sign_speed(tags)),
         )
         self.sign_ids.add(int(node.id))
         self.count += 1
@@ -200,7 +215,7 @@ def write_json(con, sql, output, generated, kind):
     count = 0
     with open(output, "w", encoding="utf-8") as handle:
         handle.write(json.dumps({
-            "schema": 1, "region": "VN", "type": kind,
+            "schema": 2, "region": "VN", "type": kind,
             "generated_at": generated, "source": SOURCE,
             "license": "ODbL; © OpenStreetMap contributors",
         }, ensure_ascii=False)[:-1] + ',"features":[')
@@ -242,7 +257,7 @@ def main():
                 (name, head, way_id, sid),
             )
     for key, value in [
-        ("schema", "1"), ("generated_at", generated), ("source", SOURCE),
+        ("schema", "2"), ("generated_at", generated), ("source", SOURCE),
         ("region", "VN"), ("attribution", "© OpenStreetMap contributors"),
     ]:
         con.execute("INSERT INTO meta VALUES (?,?)", (key, value))
@@ -260,7 +275,7 @@ def main():
         for block in iter(lambda: inp.read(1024 * 1024), b""):
             compressed.write(block)
     manifest = {
-        "schema": 1, "region": "VN", "generated_at": generated,
+        "schema": 2, "region": "VN", "generated_at": generated,
         "source": SOURCE, "signs": n_sign, "speed_segments": n_speed,
         "attribution": "© OpenStreetMap contributors",
     }
