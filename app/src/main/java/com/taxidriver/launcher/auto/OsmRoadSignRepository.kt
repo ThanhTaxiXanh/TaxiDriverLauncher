@@ -119,7 +119,7 @@ internal class OsmRoadSignRepository(
         // geometry; separate signs without verifiable way membership are ignored.
         return "[out:json][timeout:12];(" +
             "node(around:" + at + ")[traffic_sign];" +
-            "node(around:" + at + ")[highway~\\\"^(stop|give_way)$\\\"];" +
+            "node(around:" + at + ")[highway~\"^(stop|give_way)$\"];" +
             "node(around:" + at + ")[railway=level_crossing];" +
             ")->.signs;(.signs;way(bn.signs)[highway];);out body geom;"
     }
