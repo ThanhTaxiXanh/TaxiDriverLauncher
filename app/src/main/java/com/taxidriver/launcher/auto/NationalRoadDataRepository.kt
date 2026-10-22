@@ -203,7 +203,7 @@ internal class NationalRoadDataRepository(
     private fun installBundledAsset() {
         val temp = File(store, "vietnam_road_data.bundled.next")
         try {
-            assets.open("vietnam_road_data.db.gz").use { unpack(it, temp) }
+            assets.open("vietnam_road_data.osmcache").use { unpack(it, temp) }
             installFile(temp, "APK")
         } finally {
             temp.delete()
