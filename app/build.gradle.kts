@@ -261,6 +261,9 @@ android {
             // Serve the built web payload (webmap/dist/web/...) as assets/web/...;
             // see the node {} block above.
             assets.directories.add(rootProject.file("webmap/dist").path)
+            // SQLite bundled by the Android Auto workflow is generated at build
+            // time (gitignored). Explicitly include it alongside the web assets.
+            assets.directories.add(file("src/main/assets").path)
         }
         // One SSOT for the fixture builders both the JVM unit tests and the
         // instrumented tests need: src/sharedTest is compiled into each, so the
