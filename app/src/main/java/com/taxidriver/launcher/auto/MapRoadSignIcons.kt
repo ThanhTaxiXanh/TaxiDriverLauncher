@@ -60,6 +60,15 @@ internal object MapRoadSignIcons {
                 canvas.drawPath(triangle, paint)
                 paint.style = Paint.Style.FILL
             }
+            RoadSignKind.SPEED_LIMIT -> {
+                // Blank numeric speed sign: exact maxspeed value comes from the
+                // OSM GeoJSON text property, never from a guessed law.
+                paint.color = Color.rgb(212, 34, 45)
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 12f
+                canvas.drawCircle(48f, 45f, 35f, paint)
+                paint.style = Paint.Style.FILL
+            }
             RoadSignKind.OTHER -> {
                 paint.color = Color.rgb(65, 108, 172)
                 paint.style = Paint.Style.STROKE
