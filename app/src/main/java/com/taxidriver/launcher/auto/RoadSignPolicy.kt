@@ -16,6 +16,7 @@ internal enum class RoadSignKind(val title: String, val glyph: String) {
     RAILWAY("Đường sắt giao cắt", "⚠"),
     HAZARD("Nguy hiểm", "⚠"),
     OTHER("Biển báo OSM", "i"),
+    SPEED_LIMIT("Giới hạn tốc độ", "km/h"),
 }
 
 internal data class RoadCoordinate(val latitude: Double, val longitude: Double)
@@ -35,6 +36,7 @@ internal data class OsmMapSign(
     val id: Long,
     val kind: RoadSignKind,
     val position: RoadCoordinate,
+    val speedLimitKmh: Int? = null,
 )
 
 internal data class NearbyMapSign(
@@ -42,6 +44,7 @@ internal data class NearbyMapSign(
     val kind: RoadSignKind,
     val position: RoadCoordinate,
     val distanceMeters: Int,
+    val speedLimitKmh: Int? = null,
 )
 
 internal data class UpcomingRoadSign(
@@ -79,7 +82,7 @@ internal object RoadSignPolicy {
             val dy = (p.latitude - car.latitude) * EARTH_METERS_PER_DEGREE
             val distance = hypot(dx, dy)
             if (distance > radiusMeters) return@mapNotNull null
-            NearbyMapSign(sign.id, sign.kind, p, distance.toInt())
+            NearbyMapSign(sign.id, sign.kind, p, distance.toInt(), sign.speedLimitKmh)
         }.sortedBy { it.distanceMeters }.distinctBy { it.id }
     }
 
