@@ -29,7 +29,7 @@ import kotlin.math.roundToInt
  */
 internal class NationalRoadDataRepository(
     context: Context,
-    private val onUpdate: (pins: List<OsmMapSign>, limitKmh: Int?, usable: Boolean, source: String) -> Unit,
+    private val onUpdate: (pins: List<OsmMapSign>, limitKmh: Int?, usable: Boolean, source: String, reason: SpeedLimitDiagnostic) -> Unit,
 ) {
     private val executor = Executors.newSingleThreadExecutor()
     private val downloader = Executors.newSingleThreadExecutor()
@@ -114,7 +114,7 @@ internal class NationalRoadDataRepository(
     private fun notifyStatus() {
         val available = sqlite != null
         val mode = cacheSource
-        handler.post { if (!closed) onUpdate(emptyList(), null, available, mode) }
+        handler.post { if (!closed) onUpdate(emptyList(), null, available, mode, SpeedLimitDiagnostic.CACHE_PENDING) }
     }
 
     private fun validated(path: File): Boolean {
@@ -283,55 +283,80 @@ internal class NationalRoadDataRepository(
                     pins.add(OsmMapSign(cursor.getLong(0), kind, position))
                 }
             }
-            val trustedLimit = if (q.bearing != null && q.reliableRoadNames.isNotEmpty()) {
-                findSpeedLimit(db, q, latSpan, lonSpan)
-            } else null
+            val result = when {
+                q.reliableRoadNames.isEmpty() ->
+                    SpeedLimitMatch(null, SpeedLimitDiagnostic.ROAD_UNMATCHED)
+                q.bearing == null ->
+                    SpeedLimitMatch(null, SpeedLimitDiagnostic.HEADING_MISSING)
+                else -> findSpeedLimit(db, q)
+            }
             handler.post {
-                if (!closed) onUpdate(pins, trustedLimit, true, cacheSource)
+                if (!closed) onUpdate(pins, result.limitKmh, true, cacheSource, result.reason)
             }
         } catch (e: Exception) {
             Log.w("TaxiDriverAuto", "Vietnam road query failed", e)
         }
     }
 
-    private fun findSpeedLimit(
-        db: SQLiteDatabase, q: Query, latSpan: Double, lonSpan: Double,
-    ): Int? {
+    /**
+     * Conservative same-way matching. Reducing the candidate rectangle from
+     * 550 m to 100 m prevents arbitrary SQL LIMIT truncation on dense streets.
+     * No limit is displayed unless road name, geometry and bearing all agree.
+     */
+    private fun findSpeedLimit(db: SQLiteDatabase, q: Query): SpeedLimitMatch {
         val names = q.reliableRoadNames.map(::normalizeRoad).filter(String::isNotEmpty).toSet()
-        if (names.isEmpty()) return null
+        if (names.isEmpty()) {
+            return SpeedLimitMatch(null, SpeedLimitDiagnostic.ROAD_UNMATCHED)
+        }
+        val latSpan = 100.0 / 111_320.0
+        val lonSpan = latSpan / cos(Math.toRadians(q.lat)).coerceAtLeast(0.2)
+        var tagged = 0
+        var named = 0
+        var close = 0
+        var aligned = 0
         val options = mutableListOf<NearbySpeed>()
         db.rawQuery(
             "SELECT name,maxspeed_kmh,forward_kmh,backward_kmh,geometry " +
                 "FROM speed_segments WHERE minlat<=? AND maxlat>=? AND minlon<=? " +
-                "AND maxlon>=? LIMIT 300",
+                "AND maxlon>=? LIMIT 1500",
             arrayOf(
                 (q.lat + latSpan).toString(), (q.lat - latSpan).toString(),
                 (q.lon + lonSpan).toString(), (q.lon - lonSpan).toString(),
             ),
         ).use { cursor ->
             while (cursor.moveToNext()) {
+                tagged++
                 if (normalizeRoad(cursor.getString(0)) !in names) continue
+                named++
                 val coordinates = JSONArray(cursor.getString(4))
                 val nearest = nearestSegment(q, coordinates) ?: continue
-                if (nearest.distance > 18.0) continue
+                if (nearest.distance > 24.0) continue
+                close++
                 val signedHeading = abs(
                     ((nearest.heading - q.bearing!! + 540.0) % 360.0) - 180.0,
                 )
-                val forward = signedHeading <= 32.0
-                val backward = signedHeading >= 148.0
+                val forward = signedHeading <= 35.0
+                val backward = signedHeading >= 145.0
                 if (!forward && !backward) continue
                 val selected = if (forward) cursor.getNullableInt(2)
                     else cursor.getNullableInt(3)
                 val limit = selected ?: cursor.getNullableInt(1) ?: continue
                 if (limit !in 5..200) continue
+                aligned++
                 options.add(NearbySpeed(nearest.distance, limit))
             }
         }
-        if (options.isEmpty()) return null
+        if (options.isEmpty()) {
+            return SpeedLimitDiagnosticPolicy.classify(
+                tagged, named, close, aligned, emptySet(),
+            )
+        }
         val nearest = options.minOf { it.distance }
-        // If conflicting matched roads at a junction, suppress the display.
-        val close = options.filter { it.distance <= nearest + 7.0 }
-        return close.map { it.speedKmh }.distinct().singleOrNull()
+        val candidateLimits = options.filter { it.distance <= nearest + 7.0 }
+            .map { it.speedKmh }.toSet()
+        return SpeedLimitDiagnosticPolicy.classify(
+            tagged, named, close, aligned, candidateLimits,
+        )
     }
 
     private fun android.database.Cursor.getNullableInt(index: Int): Int? =
