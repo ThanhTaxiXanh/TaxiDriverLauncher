@@ -14,8 +14,9 @@ internal object MapRoadSignIcons {
         "taxi-osm-sign-" + kind.name.lowercase(Locale.ROOT)
 
     fun create(kind: RoadSignKind): Bitmap {
-        val bitmap = Bitmap.createBitmap(96, 108, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(112, 154, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        canvas.translate(8f, 0f)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = Color.argb(75, 0, 0, 0)
         canvas.drawOval(RectF(21f, 91f, 75f, 104f), paint)
@@ -89,6 +90,21 @@ internal object MapRoadSignIcons {
                 canvas.drawText(symbol, 48f, 57f, paint)
             }
         }
+        // A vertical connector keeps the actual OSM point below the floating
+        // road-sign face, even with the road map pitched to 60 degrees.
+        paint.style = Paint.Style.STROKE
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeWidth = 4f
+        paint.color = Color.WHITE
+        canvas.drawLine(48f, 89f, 48f, 143f, paint)
+        paint.strokeWidth = 2f
+        paint.color = Color.rgb(42, 127, 208)
+        canvas.drawLine(48f, 103f, 48f, 143f, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = Color.WHITE
+        canvas.drawCircle(48f, 143f, 7f, paint)
+        paint.color = Color.rgb(205, 37, 45)
+        canvas.drawCircle(48f, 143f, 4f, paint)
         return bitmap
     }
 }
