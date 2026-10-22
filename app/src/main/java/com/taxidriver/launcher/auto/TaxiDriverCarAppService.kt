@@ -51,6 +51,7 @@ import com.mapbox.maps.extension.style.layers.properties.generated.IconAnchor
 import com.mapbox.maps.extension.style.layers.properties.generated.IconPitchAlignment
 import com.mapbox.maps.extension.style.layers.properties.generated.IconRotationAlignment
 import com.mapbox.maps.extension.style.layers.generated.fillExtrusionLayer
+import com.mapbox.maps.extension.style.layers.generated.lineLayer
 import com.mapbox.maps.extension.style.expressions.dsl.generated.get
 import com.mapbox.maps.extension.style.expressions.dsl.generated.literal
 import com.mapbox.maps.extension.androidauto.MapboxCarMap
@@ -96,6 +97,13 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
     private var diagnosticWidget: VietnamDataDebugWidget? = null
     private var nationalCacheSource = "CHƯA NẠP"
     private var nationalPins: List<OsmMapSign> = emptyList()
+    private var taggedRoadSpeeds: List<TaggedRoadSpeed> = emptyList()
+    private var taggedRoadsUpdatedMillis = -1L
+    private var lastRoadSpeedSignature: String? = null
+    private val roadSpeedLineSourceId = "taxi-tagged-speed-road-lines"
+    private val roadSpeedLineLayerId = "taxi-tagged-speed-road-layer"
+    private val roadSpeedPinSourceId = "taxi-tagged-speed-road-pins"
+    private val roadSpeedPinLayerId = "taxi-tagged-speed-road-labels"
     private var nationalDatasetUsable = false
     private var nationalSpeedLimit: Int? = null
     private var nationalLimitDiagnostic = SpeedLimitDiagnostic.CACHE_PENDING
@@ -110,6 +118,10 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
             nationalLimitDiagnostic = reason
             lastNationalQueryMillis = SystemClock.elapsedRealtime()
             refreshSpeedHud()
+        }, onRoadSpeedVisuals = { roads ->
+            taggedRoadSpeeds = roads
+            taggedRoadsUpdatedMillis = SystemClock.elapsedRealtime()
+            refreshRoadSpeedMap()
         }
     }
     private val mapSignSourceId = "taxi-osm-nearby-signs"
@@ -240,8 +252,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         styleReady = false
         cameraInitialized = false
         lastNearbySignsSignature = null
+        lastRoadSpeedSignature = null
         surface.mapSurface.getMapboxMap().loadStyle(
-            style(if (night) Style.DARK else Style.MAPBOX_STREETS) {
+            style(if (night) "mapbox://styles/mapbox/navigation-night-v1" else Style.MAPBOX_STREETS) {
                 +image(markerId, markerBitmap)
                 for (kind in RoadSignKind.entries) {
                     +image(MapRoadSignIcons.imageId(kind), MapRoadSignIcons.create(kind))
@@ -249,6 +262,15 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                     // An empty source prevents a phantom marker at the equator.
                     +geoJsonSource(sourceId) {
                         featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+                    }
+                    +geoJsonSource(roadSpeedLineSourceId) {
+                        featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+                    }
+                    // Accent ONLY actual speed-tagged OSM road segments.
+                    +lineLayer(roadSpeedLineLayerId, roadSpeedLineSourceId) {
+                        lineColor(if (night) "#f2ad50" else "#bc7932")
+                        lineWidth(3.0)
+                        lineOpacity(if (night) 0.76 else 0.45)
                     }
                     +fillExtrusionLayer("taxi-driver-buildings-3d", "composite") {
                         sourceLayer("building")
@@ -268,6 +290,26 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                         textHaloColor(if (isNightInVietnam()) "#17304a" else "#ffffff")
                         textHaloWidth(2.5)
                         textOffset(listOf(0.0, 4.0))
+                        textAllowOverlap(true)
+                    }
+                    +geoJsonSource(roadSpeedPinSourceId) {
+                        featureCollection(FeatureCollection.fromFeatures(emptyList<Feature>()))
+                    }
+                    // Road-specific speed badges. They do not set the car HUD limit.
+                    +symbolLayer(roadSpeedPinLayerId, roadSpeedPinSourceId) {
+                        iconImage(MapRoadSignIcons.imageId(RoadSignKind.SPEED_LIMIT))
+                        iconAnchor(IconAnchor.BOTTOM)
+                        iconAllowOverlap(true)
+                        iconIgnorePlacement(true)
+                        iconSize(0.70)
+                        iconPitchAlignment(IconPitchAlignment.VIEWPORT)
+                        iconRotationAlignment(IconRotationAlignment.VIEWPORT)
+                        textField(get { literal("speed") })
+                        textSize(24.0)
+                        textColor("#142031")
+                        textHaloColor("#FFFFFF")
+                        textHaloWidth(0.8)
+                        textOffset(listOf(0.0, -3.0))
                         textAllowOverlap(true)
                     }
                     +geoJsonSource(mapSignSourceId) {
@@ -317,6 +359,7 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
                 latestLocation?.let(::updateCamera)
                 updateRoadLabel()
                 refreshNearbyMapSigns()
+                refreshRoadSpeedMap()
             }
         }
     }
@@ -513,6 +556,81 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         lastNearbySignsSignature = key
     }
 
+    /**
+     * Display authentic OSM way-level speed limits directly over tagged roads,
+     * similar to conventional navigation maps. No untagged or directionally
+     * ambiguous segment is given an invented number.
+     */
+    private fun refreshRoadSpeedMap() {
+        if (!styleReady) return
+        val map = attachedSurface?.mapSurface?.getMapboxMap() ?: return
+        val style = map.getStyle() ?: return
+        val pinSource = style.getSourceAs<GeoJsonSource>(roadSpeedPinSourceId) ?: return
+        val lineSource = style.getSourceAs<GeoJsonSource>(roadSpeedLineSourceId) ?: return
+        val now = SystemClock.elapsedRealtime()
+        val gps = latestLocation
+        val valid = gps != null && gps.hasAccuracy() && gps.accuracy <= 35f &&
+            (now - gps.elapsedRealtimeNanos / 1_000_000L) in 0L..6_000L &&
+            taggedRoadsUpdatedMillis >= 0L &&
+            now - taggedRoadsUpdatedMillis <= 12_000L
+        val roads = if (valid) taggedRoadSpeeds else emptyList()
+        val dimensions = map.getSize()
+        val width = dimensions.width.toDouble()
+        val height = dimensions.height.toDouble()
+        val car = gps?.let { RoadCoordinate(it.latitude, it.longitude) }
+        val projected = if (car != null) roads.mapNotNull { road ->
+            // Select an actually visible point ON the speed-tagged way.
+            // This spreads badges across the map instead of stacking them
+            // at intersections near the vehicle.
+            val step = (road.geometry.size / 35).coerceAtLeast(1)
+            val candidates = road.geometry.filterIndexed { index, _ ->
+                index % step == 0 || index == road.geometry.lastIndex
+            }.map { coordinate ->
+                val xy = map.pixelForCoordinate(Point.fromLngLat(
+                    coordinate.longitude, coordinate.latitude,
+                ))
+                coordinate to xy
+            }.filter { (_, xy) ->
+                xy.x >= 48.0 && xy.x <= width - 48.0 &&
+                    xy.y >= 125.0 && xy.y <= height - 130.0
+            }
+            val chosen = candidates.minByOrNull { (_, xy) ->
+                kotlin.math.abs(xy.y - height * 0.47) +
+                    kotlin.math.abs(xy.x - width * 0.5) * 0.15
+            } ?: return@mapNotNull null
+            val sign = NearbyMapSign(
+                road.wayId, RoadSignKind.SPEED_LIMIT, chosen.first, 0, road.limitKmh,
+            )
+            ProjectedMapSign(sign, chosen.second.x, chosen.second.y)
+        } else emptyList()
+        val visible = MapSignPresentation.display(
+            projected, maxItems = 12, separationPx = 78.0,
+        )
+        val byId = roads.associateBy { it.wayId }
+        val selectedIds = visible.map { it.sign.id }
+        val signature = roads.joinToString("|") { "${it.wayId}:${it.limitKmh}" } +
+            "#" + selectedIds.joinToString("|") { id -> "${id}" }
+        if (signature == lastRoadSpeedSignature) return
+        val lineFeatures = roads.take(45).map { road ->
+            Feature.fromGeometry(com.mapbox.geojson.LineString.fromLngLats(
+                road.geometry.map { Point.fromLngLat(it.longitude, it.latitude) },
+            )).apply {
+                addNumberProperty("speed", road.limitKmh)
+            }
+        }
+        val markers = visible.mapNotNull { projectedPin ->
+            val actualWay = byId[projectedPin.sign.id] ?: return@mapNotNull null
+            val point = projectedPin.sign.position
+            Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude)).apply {
+                addStringProperty("speed", actualWay.limitKmh.toString())
+                addNumberProperty("way_id", actualWay.wayId)
+            }
+        }
+        lineSource.featureCollection(FeatureCollection.fromFeatures(lineFeatures))
+        pinSource.featureCollection(FeatureCollection.fromFeatures(markers))
+        lastRoadSpeedSignature = signature
+    }
+
     private fun maybeRequestSigns() {
         val now = SystemClock.elapsedRealtime()
         val fix = latestLocation ?: return
@@ -543,6 +661,9 @@ private class DriverMapScreen(private val carMap: MapboxCarMap) :
         lastMatchedRoadMillis = -1L
         nationalPins = emptyList()
         nationalSpeedLimit = null
+        taggedRoadSpeeds = emptyList()
+        taggedRoadsUpdatedMillis = -1L
+        lastRoadSpeedSignature = null
         nationalLimitDiagnostic = SpeedLimitDiagnostic.CACHE_PENDING
         lastNationalQueryMillis = -1L
         refreshSpeedHud()
