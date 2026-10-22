@@ -12,6 +12,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -28,10 +29,12 @@ import kotlin.math.roundToInt
  */
 internal class NationalRoadDataRepository(
     context: Context,
-    private val onUpdate: (pins: List<OsmMapSign>, limitKmh: Int?, usable: Boolean) -> Unit,
+    private val onUpdate: (pins: List<OsmMapSign>, limitKmh: Int?, usable: Boolean, source: String) -> Unit,
 ) {
     private val executor = Executors.newSingleThreadExecutor()
+    private val downloader = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
+    private val assets = context.applicationContext.assets
     private val store = File(context.applicationContext.filesDir, "vietnam-driving-data")
     private val database = File(store, "vietnam_road_data.db")
     private val http = OkHttpClient.Builder()
@@ -41,6 +44,8 @@ internal class NationalRoadDataRepository(
         .build()
     private var started = false
     private var closed = false
+    private var cacheSource = "CHƯA NẠP"
+    private var downloadInProgress = false
     private var downloadAttemptMs = Long.MIN_VALUE
     private var lastLookupMs = 0L
     private var busy = false
@@ -54,19 +59,33 @@ internal class NationalRoadDataRepository(
     private data class NearbySpeed(val distance: Double, val speedKmh: Int)
     private data class RoadVector(val distance: Double, val heading: Double)
 
+    /**
+     * Bundle first: GPS can query verified data without internet access.
+     * Refresh on a separate thread so network cannot block SQLite queries.
+     */
     fun start() {
-        if (closed || started) return
-        started = true
-        executor.execute {
-            try {
-                store.mkdirs()
-                openCachedDatabase()
-                refreshFromReleaseIfNeeded()
-                latestRequest?.let(::lookup)
-            } catch (e: Exception) {
-                Log.w("TaxiDriverAuto", "Vietnam offline road data unavailable", e)
+        if (closed) return
+        if (!started) {
+            started = true
+            executor.execute {
+                try {
+                    store.mkdirs()
+                    openCachedDatabase()
+                    if (sqlite == null) installBundledAsset()
+                    if (sqlite != null) {
+                        latestRequest?.let(::lookup)
+                        notifyStatus()
+                    } else {
+                        cacheSource = "CHƯA NẠP"
+                        notifyStatus()
+                    }
+                } catch (e: Exception) {
+                    Log.w("TaxiDriverAuto", "Vietnam OSM packaged cache unavailable", e)
+                    notifyStatus()
+                }
             }
         }
+        maybeCheckForUpdate()
     }
 
     fun maybeLookup(fix: Location, names: List<String>, trustedRoad: Boolean) {
@@ -79,6 +98,7 @@ internal class NationalRoadDataRepository(
             fix.latitude, fix.longitude, bearing,
             if (trustedRoad) names else emptyList(),
         )
+        maybeCheckForUpdate()
         if (busy || now - lastLookupMs < 3_000L) return
         lastLookupMs = now
         busy = true
@@ -91,86 +111,150 @@ internal class NationalRoadDataRepository(
         }
     }
 
-    private fun openCachedDatabase() {
-        if (!database.isFile) return
+    private fun notifyStatus() {
+        val available = sqlite != null
+        val mode = cacheSource
+        handler.post { if (!closed) onUpdate(emptyList(), null, available, mode) }
+    }
+
+    private fun validated(path: File): Boolean {
+        if (!path.isFile || path.length() <= 0L) return false
+        val db = SQLiteDatabase.openDatabase(
+            path.path, null, SQLiteDatabase.OPEN_READONLY,
+        )
         try {
-            val db = SQLiteDatabase.openDatabase(
-                database.path, null, SQLiteDatabase.OPEN_READONLY,
-            )
-            val valid = db.rawQuery("SELECT value FROM meta WHERE key='schema'", null)
+            val schema = db.rawQuery("SELECT value FROM meta WHERE key='schema'", null)
                 .use { it.moveToFirst() && it.getString(0) == "1" }
-            if (!valid) {
-                db.close()
-                return
-            }
-            sqlite = db
-        } catch (e: Exception) {
-            Log.w("TaxiDriverAuto", "Cached Vietnam OSM database invalid", e)
+            if (!schema) return false
+            return db.rawQuery("SELECT COUNT(*) FROM signs", null)
+                .use { it.moveToFirst() && it.getInt(0) > 0 } &&
+                db.rawQuery("SELECT COUNT(*) FROM speed_segments", null)
+                .use { it.moveToFirst() && it.getInt(0) > 0 }
+        } finally {
+            db.close()
         }
     }
 
-    private fun refreshFromReleaseIfNeeded() {
-        if (closed) return
-        // Previously downloaded database remains available offline.
-        if (sqlite != null && System.currentTimeMillis() - database.lastModified() <
-            14L * 24L * 60L * 60L * 1000L
-        ) return
+    private fun openCachedDatabase() {
+        if (!database.isFile) return
+        try {
+            if (!validated(database)) return
+            sqlite = SQLiteDatabase.openDatabase(
+                database.path, null, SQLiteDatabase.OPEN_READONLY,
+            )
+            cacheSource = "CACHE"
+        } catch (e: Exception) {
+            Log.w("TaxiDriverAuto", "Vietnam OSM database invalid", e)
+        }
+    }
+
+    private fun unpack(input: InputStream, target: File) {
+        GZIPInputStream(input).use { gz ->
+            FileOutputStream(target).use { out ->
+                val buffer = ByteArray(32_768)
+                var total = 0L
+                while (true) {
+                    val n = gz.read(buffer)
+                    if (n == -1) break
+                    total += n
+                    if (total > 300L * 1024L * 1024L) {
+                        throw IllegalArgumentException("Vietnam OSM cache too large")
+                    }
+                    out.write(buffer, 0, n)
+                }
+                out.fd.sync()
+            }
+        }
+    }
+
+    private fun installFile(candidate: File, newSource: String) {
+        if (!validated(candidate)) {
+            throw IllegalArgumentException("Vietnam OSM SQLite cache verification failed")
+        }
+        val old = File(store, "vietnam_road_data.previous")
+        old.delete()
+        sqlite?.close()
+        sqlite = null
+        if (database.exists() && !database.renameTo(old)) {
+            openCachedDatabase()
+            throw IllegalStateException("Unable to preserve previous offline OSM cache")
+        }
+        try {
+            if (!candidate.renameTo(database)) {
+                candidate.copyTo(database, overwrite = true)
+                candidate.delete()
+            }
+            openCachedDatabase()
+            if (sqlite == null) throw IllegalStateException("Unable to open new OSM cache")
+            cacheSource = newSource
+            old.delete()
+            notifyStatus()
+            latestRequest?.let(::lookup)
+            Log.i("TaxiDriverAuto", "Vietnam OSM: $newSource cached database ready")
+        } catch (e: Exception) {
+            database.delete()
+            if (old.exists()) old.renameTo(database)
+            openCachedDatabase()
+            notifyStatus()
+            throw e
+        }
+    }
+
+    private fun installBundledAsset() {
+        val temp = File(store, "vietnam_road_data.bundled.next")
+        try {
+            assets.open("vietnam_road_data.db.gz").use { unpack(it, temp) }
+            installFile(temp, "APK")
+        } finally {
+            temp.delete()
+        }
+    }
+
+    private fun maybeCheckForUpdate() {
+        if (closed || !started || downloadInProgress) return
         val now = SystemClock.elapsedRealtime()
         if (downloadAttemptMs != Long.MIN_VALUE &&
-            now - downloadAttemptMs < 60L * 60L * 1000L
+            now - downloadAttemptMs < 15L * 60L * 1_000L
+        ) return
+        // Avoid repeat downloads when a verified cache was installed recently.
+        if (database.isFile &&
+            System.currentTimeMillis() - database.lastModified() in
+                0L..(24L * 60L * 60L * 1_000L)
         ) return
         downloadAttemptMs = now
-        val url = "https://github.com/ThanhTaxiXanh/TaxiDriverLauncher/" +
-            "releases/download/vietnam-osm-data/vietnam_road_data.db.gz"
-        val request = Request.Builder().url(url)
-            .header("User-Agent", "TaxiDriverLauncher-AndroidAuto/3.0.5")
-            .build()
-        try {
-            http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return
-                val body = response.body ?: return
-                val tmp = File(store, "vietnam_road_data.next")
-                try {
-                    GZIPInputStream(body.byteStream()).use { inp ->
-                        FileOutputStream(tmp).use { out ->
-                            val buffer = ByteArray(32_768)
-                            var total = 0L
-                            while (true) {
-                                val n = inp.read(buffer)
-                                if (n < 0) break
-                                total += n
-                                if (total > 300L * 1024L * 1024L) {
-                                    throw IllegalStateException("Road cache exceeds 300 MiB")
-                                }
-                                out.write(buffer, 0, n)
-                            }
-                            out.fd.sync()
-                        }
-                    }
-                    val candidate = SQLiteDatabase.openDatabase(
-                        tmp.path, null, SQLiteDatabase.OPEN_READONLY,
+        downloadInProgress = true
+        downloader.execute {
+            val url = "https://github.com/ThanhTaxiXanh/TaxiDriverLauncher/" +
+                "releases/download/vietnam-osm-data/vietnam_road_data.db.gz"
+            val tmp = File(store, "vietnam_road_data.remote.next")
+            var downloaded = false
+            try {
+                val request = Request.Builder().url(url)
+                    .header("User-Agent", "TaxiDriverLauncher-AndroidAuto/3.0.5.1")
+                    .build()
+                http.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw IllegalStateException(
+                        "OSM database HTTP ${response.code}",
                     )
-                    val valid = candidate.rawQuery(
-                        "SELECT value FROM meta WHERE key='schema'", null,
-                    ).use { it.moveToFirst() && it.getString(0) == "1" }
-                    candidate.close()
-                    if (!valid) throw IllegalArgumentException("Unknown road data schema")
-                    sqlite?.close()
-                    sqlite = null
-                    if (!tmp.renameTo(database)) {
-                        tmp.copyTo(database, overwrite = true)
+                    val body = response.body ?: throw IllegalStateException("Empty OSM download")
+                    unpack(body.byteStream(), tmp)
+                }
+                downloaded = true
+            } catch (e: Exception) {
+                Log.w("TaxiDriverAuto", "Vietnam OSM update retry later", e)
+                tmp.delete()
+            } finally {
+                executor.execute {
+                    try {
+                        if (downloaded && !closed) installFile(tmp, "ONLINE")
+                    } catch (e: Exception) {
+                        Log.w("TaxiDriverAuto", "Vietnam OSM remote dataset invalid", e)
+                    } finally {
                         tmp.delete()
+                        handler.post { downloadInProgress = false }
                     }
-                    openCachedDatabase()
-                    Log.i("TaxiDriverAuto", "Vietnam road database cache refreshed")
-                } finally {
-                    tmp.delete()
                 }
             }
-        } catch (e: Exception) {
-            // Network or release failures should not break the existing live
-            // Mapbox matching, GPS speed HUD, or Overpass sign layer.
-            Log.w("TaxiDriverAuto", "Vietnam OSM data download deferred", e)
         }
     }
 
@@ -203,7 +287,7 @@ internal class NationalRoadDataRepository(
                 findSpeedLimit(db, q, latSpan, lonSpan)
             } else null
             handler.post {
-                if (!closed) onUpdate(pins, trustedLimit, true)
+                if (!closed) onUpdate(pins, trustedLimit, true, cacheSource)
             }
         } catch (e: Exception) {
             Log.w("TaxiDriverAuto", "Vietnam road query failed", e)
@@ -291,5 +375,6 @@ internal class NationalRoadDataRepository(
             sqlite = null
         }
         executor.shutdown()
+        downloader.shutdownNow()
     }
 }
