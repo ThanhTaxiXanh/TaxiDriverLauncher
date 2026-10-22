@@ -59,6 +59,18 @@ internal object MapRoadSignIcons {
                 canvas.drawPath(triangle, paint)
                 paint.style = Paint.Style.FILL
             }
+            RoadSignKind.OTHER -> {
+                paint.color = Color.rgb(65, 108, 172)
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 7f
+                canvas.drawCircle(48f, 45f, 35f, paint)
+                paint.style = Paint.Style.FILL
+                paint.color = Color.rgb(27, 65, 114)
+                paint.textAlign = Paint.Align.CENTER
+                paint.textSize = 44f
+                paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                canvas.drawText("i", 48f, 61f, paint)
+            }
             RoadSignKind.RAILWAY, RoadSignKind.PEDESTRIAN, RoadSignKind.HAZARD -> {
                 paint.color = Color.rgb(204, 37, 43)
                 paint.style = Paint.Style.STROKE

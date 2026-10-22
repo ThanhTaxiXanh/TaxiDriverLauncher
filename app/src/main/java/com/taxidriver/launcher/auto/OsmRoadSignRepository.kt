@@ -159,7 +159,9 @@ internal class OsmRoadSignRepository(
                 .ifBlank { tags.optString("direction") }
             // Driving warnings still require explicit relative direction and
             // association with a named road. No nearby-road guesses.
-            if (direction == "forward" || direction == "backward") {
+            if (kind != RoadSignKind.OTHER &&
+                (direction == "forward" || direction == "backward")
+            ) {
                 directionalNodes[id] = position to (kind to direction)
             }
         }
@@ -206,7 +208,11 @@ internal class OsmRoadSignRepository(
                 "give_way", "yield" -> RoadSignKind.GIVE_WAY
                 "pedestrian_crossing" -> RoadSignKind.PEDESTRIAN
                 "hazard", "danger" -> RoadSignKind.HAZARD
-                else -> null
+                // National sign codes (e.g. VN:...) are real OSM data but
+                // should never be assigned an invented sign meaning.
+                else -> if (tags.optString("traffic_sign").isNotBlank()) {
+                    RoadSignKind.OTHER
+                } else null
             }
         }
     }

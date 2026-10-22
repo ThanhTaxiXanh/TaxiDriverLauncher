@@ -15,6 +15,7 @@ internal enum class RoadSignKind(val title: String, val glyph: String) {
     PEDESTRIAN("Lối người đi bộ", "🚶"),
     RAILWAY("Đường sắt giao cắt", "⚠"),
     HAZARD("Nguy hiểm", "⚠"),
+    OTHER("Biển báo OSM", "i"),
 }
 
 internal data class RoadCoordinate(val latitude: Double, val longitude: Double)

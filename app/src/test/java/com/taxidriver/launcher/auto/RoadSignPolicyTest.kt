@@ -107,4 +107,11 @@ class RoadSignPolicyTest {
         assertEquals(0, RoadSignPolicy.visibleWithinRadius(car, listOf(node), Double.NaN).size)
     }
 
+    @Test fun genericCountryCodedOsmsignsAreOnlyInformationalPins() {
+        val generic = OsmMapSign(12345L, RoadSignKind.OTHER, car)
+        val pins = RoadSignPolicy.visibleWithinRadius(car, listOf(generic))
+        assertEquals(1, pins.size)
+        assertEquals(RoadSignKind.OTHER, pins.first().kind)
+    }
+
 }
